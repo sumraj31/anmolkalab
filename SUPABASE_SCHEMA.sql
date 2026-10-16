@@ -168,3 +168,22 @@ drop policy if exists "Admin Media Delete" on storage.objects;
 create policy "Admin Media Delete"
   on storage.objects for delete
   using (bucket_id = 'anmolkala-media' and auth.role() = 'authenticated');
+
+-- 10. ENABLE SUPABASE REALTIME REPLICATION
+-- Required for instant real-time sync across all connected visitors when items are added, updated, or deleted
+do $$
+begin
+  begin
+    alter publication supabase_realtime add table public.store_items;
+  exception when duplicate_object then null;
+  end;
+  begin
+    alter publication supabase_realtime add table public.categories;
+  exception when duplicate_object then null;
+  end;
+  begin
+    alter publication supabase_realtime add table public.product_media;
+  exception when duplicate_object then null;
+  end;
+end $$;
+

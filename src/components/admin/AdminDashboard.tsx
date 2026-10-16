@@ -23,6 +23,8 @@ import {
   generateUniqueId,
   fetchDatabaseStatus,
   DatabaseStatus,
+  subscribeToProducts,
+  subscribeToCategories,
 } from '../../services/supabase';
 import { handleImageError } from '../../utils/helpers';
 
@@ -181,6 +183,34 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   useEffect(() => {
     loadData();
+
+    const unsubProducts = subscribeToProducts((payload) => {
+      if (payload.eventType === 'INSERT') {
+        const item = payload.new;
+        setProducts((prev) => {
+          const exists = prev.some((p) => p.id === item.id);
+          if (exists) return prev.map((p) => (p.id === item.id ? item : p));
+          return [item, ...prev];
+        });
+      } else if (payload.eventType === 'UPDATE') {
+        const item = payload.new;
+        setProducts((prev) => prev.map((p) => (p.id === item.id ? item : p)));
+      } else if (payload.eventType === 'DELETE') {
+        const deletedId = payload.old?.id;
+        if (deletedId) {
+          setProducts((prev) => prev.filter((p) => p.id !== deletedId));
+        }
+      }
+    });
+
+    const unsubCategories = subscribeToCategories(() => {
+      fetchCategories().then((cats) => setCategories(cats));
+    });
+
+    return () => {
+      unsubProducts();
+      unsubCategories();
+    };
   }, []);
 
   // Database Aggregate Counts (never default to false 0 when loading)

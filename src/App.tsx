@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Product, StoreItem, DrawerType, AdminSession, CategoryItem } from './types';
-import { defaultProducts, brandInfo, defaultCategories } from './data/products';
+import { brandInfo, defaultCategories } from './data/products';
 import { loadStorage, saveStorage } from './utils/helpers';
 import { parsePath, slugifyCategory, matchCategoryFromSlug } from './utils/routing';
 import { Header } from './components/Header';
@@ -17,14 +17,24 @@ import { Footer } from './components/Footer';
 import { Toast } from './components/Toast';
 import { AdminLogin } from './components/admin/AdminLogin';
 import { AdminDashboard } from './components/admin/AdminDashboard';
-import { getAdminSession, fetchProducts, fetchCategories } from './services/supabase';
+import {
+  getAdminSession,
+  fetchProducts,
+  fetchCategories,
+  saveProduct,
+  deleteProduct,
+  subscribeToProducts,
+  subscribeToCategories,
+  cleanLegacyStorage,
+  isSupabaseConfigured,
+  baselineProducts,
+} from './services/supabase';
 
 const STORAGE_KEYS = {
   WISHLIST: 'ak_w',
   SAVED: 'ak_s',
   COMPARE: 'ak_c',
   RECENT: 'ak_r',
-  CUSTOM_ITEMS: 'anmolkala_store_items',
 };
 
 const ITEMS_PER_PAGE = 10;
@@ -51,13 +61,29 @@ export const App: React.FC = () => {
   const [adminSession, setAdminSession] = useState<AdminSession | null>(() => getAdminSession());
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(() => {
     if (initialRoute.view === 'product' && initialRoute.productSlug) {
-      return (
-        defaultProducts.find(
-          (p) =>
-            p.slug === initialRoute.productSlug ||
-            p.id.toLowerCase() === initialRoute.productSlug?.toLowerCase()
-        ) || null
+      const match = baselineProducts.find(
+        (p) =>
+          p.slug === initialRoute.productSlug ||
+          p.id.toLowerCase() === initialRoute.productSlug?.toLowerCase()
       );
+      if (match) {
+        return {
+          id: match.id,
+          name: match.name,
+          category: match.category,
+          slug: match.slug,
+          image: match.image_url || '/logo.png',
+          image_url: match.image_url,
+          video_url: match.video_url,
+          tags: match.tags,
+          description: match.description,
+          type: match.type === 'video' ? 'video' : 'product',
+          published: match.published,
+          availability: match.availability || 'in_stock',
+          created_at: match.created_at,
+          updated_at: match.updated_at,
+        };
+      }
     }
     return null;
   });
@@ -76,7 +102,7 @@ export const App: React.FC = () => {
   const [isAdminOpen, setIsAdminOpen] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  // User state
+  // User state (Client-side wishlist / compare / saved only)
   const [wishlist, setWishlist] = useState<string[]>(() =>
     loadStorage<string[]>(STORAGE_KEYS.WISHLIST, [])
   );
@@ -90,12 +116,11 @@ export const App: React.FC = () => {
     loadStorage<string[]>(STORAGE_KEYS.RECENT, [])
   );
 
-  // Custom Items (from Admin or API)
-  const [customItems, setCustomItems] = useState<StoreItem[]>(() =>
-    loadStorage<StoreItem[]>(STORAGE_KEYS.CUSTOM_ITEMS, [])
-  );
+  // Products initialized with baseline products and synchronized with Supabase Cloud
+  const [products, setProducts] = useState<StoreItem[]>(() => baselineProducts);
   const [dbCategories, setDbCategories] = useState<CategoryItem[]>([]);
-  const [isCatalogLoading, setIsCatalogLoading] = useState<boolean>(true);
+  const [isCatalogLoading, setIsCatalogLoading] = useState<boolean>(false);
+  const [isConfigured] = useState<boolean>(() => isSupabaseConfigured());
 
   const showToast = useCallback((msg: string) => {
     setToastMessage(msg);
@@ -104,7 +129,7 @@ export const App: React.FC = () => {
     }, 2000);
   }, []);
 
-  // Sync state to local storage
+  // Sync user client preference lists to local storage
   useEffect(() => {
     saveStorage(STORAGE_KEYS.WISHLIST, wishlist);
   }, [wishlist]);
@@ -121,30 +146,9 @@ export const App: React.FC = () => {
     saveStorage(STORAGE_KEYS.RECENT, recentList);
   }, [recentList]);
 
-  useEffect(() => {
-    saveStorage(STORAGE_KEYS.CUSTOM_ITEMS, customItems);
-  }, [customItems]);
-
-  // Authoritative catalogue: customItems from database/API takes complete precedence
+  // Authoritative catalogue: Strictly derived from Supabase cloud database
   const allProducts: Product[] = useMemo(() => {
-    const sourceList: StoreItem[] =
-      customItems.length > 0
-        ? customItems
-        : defaultProducts.map((p) => ({
-            id: p.id,
-            type: 'product',
-            name: p.name,
-            category: p.category,
-            slug: p.slug,
-            description: p.description,
-            image_url: p.image_url || p.image || '/logo.png',
-            video_url: p.video_url || '',
-            tags: p.tags,
-            published: true,
-            availability: p.availability || 'in_stock',
-          }));
-
-    return sourceList
+    return products
       .filter((item) => (item.type || 'product') === 'product' && item.published !== false)
       .map((item): Product => ({
         id: item.id,
@@ -162,7 +166,7 @@ export const App: React.FC = () => {
         created_at: item.created_at,
         updated_at: item.updated_at,
       }));
-  }, [customItems]);
+  }, [products]);
 
   // All published craft videos from active catalogue
   const allProductVideos = useMemo(() => {
@@ -326,7 +330,7 @@ export const App: React.FC = () => {
     }
   }, [categories, isCatalogLoading, allProducts]);
 
-  // Refresh products & categories from database/server
+  // Refresh products & categories from Supabase cloud database
   const refreshProducts = useCallback(async () => {
     setIsCatalogLoading(true);
     try {
@@ -334,31 +338,82 @@ export const App: React.FC = () => {
         fetchProducts(),
         fetchCategories(),
       ]);
-      if (items && items.length > 0) {
-        setCustomItems(items);
-      }
+      setProducts(items || []);
       if (cats && cats.length > 0) {
         setDbCategories(cats);
       }
     } catch (err) {
-      console.warn('Error refreshing catalog from server:', err);
+      console.warn('[AnmolKala] Error fetching from Supabase cloud database:', err);
     } finally {
       setIsCatalogLoading(false);
     }
   }, []);
 
-  // Fetch initial products on mount and bind real-time event listeners
+  // Fetch initial products on mount and bind real-time Supabase subscriptions
   useEffect(() => {
+    // 1. Wipe any legacy browser-specific product storage
+    cleanLegacyStorage();
+
+    // 2. Initial fetch from external Supabase cloud database
     refreshProducts();
 
-    const handleSync = () => {
+    // 3. Supabase Realtime subscription: instant updates (under 1 second)
+    const unsubProducts = subscribeToProducts((payload) => {
+      if (payload.eventType === 'INSERT') {
+        const item = payload.new;
+        setProducts((prev) => {
+          const exists = prev.some((p) => p.id === item.id);
+          if (exists) {
+            return prev.map((p) => (p.id === item.id ? item : p));
+          }
+          return [item, ...prev];
+        });
+      } else if (payload.eventType === 'UPDATE') {
+        const item = payload.new;
+        setProducts((prev) => prev.map((p) => (p.id === item.id ? item : p)));
+        setSelectedProduct((curr) =>
+          curr?.id === item.id
+            ? {
+                ...curr,
+                ...item,
+                image: item.image_url || '/logo.png',
+                slug: item.slug || curr.slug,
+              }
+            : curr
+        );
+      } else if (payload.eventType === 'DELETE') {
+        const deletedId = payload.old.id;
+        if (deletedId) {
+          setProducts((prev) => prev.filter((p) => p.id !== deletedId));
+          setSelectedProduct((curr) => (curr?.id === deletedId ? null : curr));
+        }
+      }
+    });
+
+    const unsubCategories = subscribeToCategories(() => {
+      fetchCategories().then((cats) => setDbCategories(cats));
+    });
+
+    // 4. Handle reconnection and tab visibility
+    const handleReconnection = () => {
       refreshProducts();
     };
-    window.addEventListener('storage', handleSync);
-    window.addEventListener('anmolkala_catalog_updated', handleSync);
+
+    window.addEventListener('online', handleReconnection);
+    window.addEventListener('focus', handleReconnection);
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        handleReconnection();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+
     return () => {
-      window.removeEventListener('storage', handleSync);
-      window.removeEventListener('anmolkala_catalog_updated', handleSync);
+      unsubProducts();
+      unsubCategories();
+      window.removeEventListener('online', handleReconnection);
+      window.removeEventListener('focus', handleReconnection);
+      document.removeEventListener('visibilitychange', handleVisibility);
     };
   }, [refreshProducts]);
 
@@ -633,23 +688,37 @@ export const App: React.FC = () => {
   }, [allProductVideos, homeVideoCategory]);
 
   // Admin save handler
-  const handleSaveAdminItem = useCallback((item: StoreItem) => {
-    setCustomItems((prev) => {
-      const idx = prev.findIndex((i) => i.id === item.id);
-      if (idx >= 0) {
-        const copy = [...prev];
-        copy[idx] = item;
-        return copy;
+  const handleSaveAdminItem = useCallback(
+    async (item: StoreItem) => {
+      try {
+        const saved = await saveProduct(item);
+        setProducts((prev) => {
+          const idx = prev.findIndex((i) => i.id === saved.id);
+          if (idx >= 0) {
+            const copy = [...prev];
+            copy[idx] = saved;
+            return copy;
+          }
+          return [saved, ...prev];
+        });
+        showToast('Item saved in Supabase database');
+      } catch (err: any) {
+        showToast(err?.message || 'Error saving item');
       }
-      return [item, ...prev];
-    });
-  }, []);
+    },
+    [showToast]
+  );
 
   // Admin delete handler
   const handleDeleteAdminItem = useCallback(
-    (id: string) => {
-      setCustomItems((prev) => prev.filter((i) => i.id !== id));
-      showToast('Item deleted');
+    async (id: string) => {
+      try {
+        await deleteProduct(id);
+        setProducts((prev) => prev.filter((i) => i.id !== id));
+        showToast('Item deleted from Supabase database');
+      } catch (err: any) {
+        showToast(err?.message || 'Error deleting item');
+      }
     },
     [showToast]
   );
@@ -1270,7 +1339,7 @@ export const App: React.FC = () => {
       <AdminModal
         isOpen={isAdminOpen}
         onClose={() => setIsAdminOpen(false)}
-        items={customItems}
+        items={products}
         onSaveItem={handleSaveAdminItem}
         onDeleteItem={handleDeleteAdminItem}
         onToast={showToast}
