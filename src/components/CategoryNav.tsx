@@ -11,18 +11,27 @@ export const CategoryNav: React.FC<CategoryNavProps> = ({
   activeCategory,
   onSelectCategory,
 }) => {
+  const normActive = (activeCategory || '').trim().toLowerCase();
+
   return (
     <nav className="cats" id="cats" aria-label="Product categories">
-      {categories.map((cat) => (
-        <button
-          key={cat}
-          type="button"
-          className={`cat ${activeCategory === cat ? 'active' : ''}`}
-          onClick={() => onSelectCategory(cat)}
-        >
-          {cat}
-        </button>
-      ))}
+      {categories.map((cat) => {
+        const isActive = normActive === cat.trim().toLowerCase();
+        return (
+          <button
+            key={cat}
+            type="button"
+            className={`cat ${isActive ? 'active' : ''}`}
+            onClick={(e) => {
+              e.preventDefault();
+              onSelectCategory(cat);
+            }}
+            aria-pressed={isActive}
+          >
+            {cat}
+          </button>
+        );
+      })}
     </nav>
   );
 };

@@ -13,3 +13,13 @@ export const defaultProducts: Product[] = (initialData.products as Product[]).ma
   type: 'product',
   published: true,
 }));
+
+const primaryCategories = ['Puja Thali', 'Photo Frames', 'Tray Sets', 'Wall Clocks'];
+const distinctCategories = Array.from(
+  new Set(
+    defaultProducts
+      .map((p) => p.category)
+      .filter((c) => Boolean(c) && c !== 'Product Image Requires Review' && !primaryCategories.includes(c))
+  )
+);
+export const defaultCategories: string[] = ['All', ...primaryCategories, ...distinctCategories];

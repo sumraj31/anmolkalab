@@ -37,6 +37,7 @@ export interface CategoryItem {
   id: string;
   name: string;
   display_order?: number;
+  product_count?: number;
   created_at?: string;
   updated_at?: string;
 }
@@ -82,6 +83,8 @@ export type DrawerType = 'wish' | 'compare' | 'saved' | 'recent' | null;
 
 export type DashboardSection =
   | 'overview'
+  | 'add-photo-product'
+  | 'add-video-product'
   | 'products'
   | 'add-product'
   | 'categories'

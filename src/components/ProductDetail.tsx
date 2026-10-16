@@ -58,7 +58,7 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
       navigator
         .share({
           title: product.name,
-          text: `AnmolKala product: ${product.name}`,
+          text: `AnmolKala handcrafted piece: ${product.name}`,
           url,
         })
         .catch(() => {});
@@ -66,6 +66,34 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
       handleCopyLink();
     }
   };
+
+  const availabilityLabel =
+    product.availability === 'out_of_stock'
+      ? 'Out of Stock'
+      : product.availability === 'made_to_order'
+      ? 'Made to Order'
+      : 'In Stock / Ready to Ship';
+
+  const availabilityBg =
+    product.availability === 'out_of_stock'
+      ? '#fef2f2'
+      : product.availability === 'made_to_order'
+      ? '#eff6ff'
+      : '#f0fdf4';
+
+  const availabilityColor =
+    product.availability === 'out_of_stock'
+      ? '#991b1b'
+      : product.availability === 'made_to_order'
+      ? '#1d4ed8'
+      : '#15803d';
+
+  const availabilityBorder =
+    product.availability === 'out_of_stock'
+      ? '#fca5a5'
+      : product.availability === 'made_to_order'
+      ? '#bfdbfe'
+      : '#bbf7d0';
 
   return (
     <section className="product-page">
@@ -75,8 +103,9 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
 
       <div className="product-top">
         <div>
+          {/* Media Switcher Tab if video is attached */}
           {product.video_url && (
-            <div style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
+            <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
               <button
                 type="button"
                 onClick={() => setShowVideo(false)}
@@ -85,13 +114,16 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
                   color: !showVideo ? '#ffffff' : '#334155',
                   border: '1px solid #cbd5e1',
                   borderRadius: '6px',
-                  padding: '6px 14px',
+                  padding: '7px 14px',
                   fontSize: '12px',
                   fontWeight: 700,
                   cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
                 }}
               >
-                📷 Photo
+                <span>📷</span> Photo
               </button>
               <button
                 type="button"
@@ -101,47 +133,144 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
                   color: showVideo ? '#ffffff' : '#334155',
                   border: '1px solid #cbd5e1',
                   borderRadius: '6px',
-                  padding: '6px 14px',
+                  padding: '7px 14px',
                   fontSize: '12px',
                   fontWeight: 700,
                   cursor: 'pointer',
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '4px',
+                  gap: '6px',
                 }}
               >
-                <span>🎥</span>
-                <span>Craft Video (play)</span>
+                <span>🎬</span> Craft Video (Demonstration)
               </button>
             </div>
           )}
 
           {showVideo && product.video_url ? (
-            <div style={{ background: '#000', borderRadius: '8px', overflow: 'hidden' }}>
+            <div
+              style={{
+                background: '#090d16',
+                borderRadius: '8px',
+                overflow: 'hidden',
+                border: '1px solid #e2e8f0',
+                boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+              }}
+            >
               <video
                 src={product.video_url}
                 controls
                 autoPlay
                 playsInline
-                style={{ width: '100%', maxHeight: '420px', display: 'block', objectFit: 'contain' }}
+                poster={product.image_url || product.image}
+                style={{ width: '100%', maxHeight: '480px', display: 'block', objectFit: 'contain' }}
               />
             </div>
           ) : (
-            <img
-              className="product-image"
-              src={product.image_url || product.image || '/logo.png'}
-              alt={product.name}
-              onError={handleImageError}
-            />
+            <div style={{ position: 'relative' }}>
+              <img
+                className="product-image"
+                src={product.image_url || product.image || '/logo.png'}
+                alt={product.name}
+                onError={handleImageError}
+              />
+              {product.video_url && !showVideo && (
+                <button
+                  type="button"
+                  onClick={() => setShowVideo(true)}
+                  style={{
+                    position: 'absolute',
+                    bottom: '12px',
+                    right: '12px',
+                    background: 'rgba(15, 23, 42, 0.88)',
+                    color: '#f8fafc',
+                    border: '1px solid rgba(255,255,255,0.2)',
+                    borderRadius: '20px',
+                    padding: '6px 12px',
+                    fontSize: '11px',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    backdropFilter: 'blur(4px)',
+                  }}
+                >
+                  <span>▶ Play Video</span>
+                </button>
+              )}
+            </div>
           )}
         </div>
 
         <div className="product-meta">
-          <div className="ct">{product.category}</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+            <span className="ct">{product.category}</span>
+            <span
+              style={{
+                fontSize: '11px',
+                fontWeight: 700,
+                padding: '2px 8px',
+                borderRadius: '12px',
+                background: availabilityBg,
+                color: availabilityColor,
+                border: `1px solid ${availabilityBorder}`,
+              }}
+            >
+              {availabilityLabel}
+            </span>
+            {product.video_url && (
+              <span
+                style={{
+                  fontSize: '11px',
+                  fontWeight: 700,
+                  padding: '2px 8px',
+                  borderRadius: '12px',
+                  background: '#f0f9ff',
+                  color: '#0284c7',
+                  border: '1px solid #bae6fd',
+                }}
+              >
+                🎥 Video Available
+              </span>
+            )}
+          </div>
+
           <h1>{product.name}</h1>
-          <p>
-            <b>Product ID:</b> {product.id}
-          </p>
+
+          {/* Product Specifications & Admin Reference Attributes */}
+          <div
+            style={{
+              background: '#f8fafc',
+              border: '1px solid #e2e8f0',
+              borderRadius: '8px',
+              padding: '12px 14px',
+              margin: '12px 0 16px',
+              fontSize: '12px',
+              lineHeight: 1.6,
+            }}
+          >
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '8px' }}>
+              <div>
+                <span style={{ color: '#64748b' }}>Item ID:</span>{' '}
+                <strong style={{ color: '#0f172a' }}>{product.id}</strong>
+              </div>
+              <div>
+                <span style={{ color: '#64748b' }}>Category:</span>{' '}
+                <strong style={{ color: '#0f172a' }}>{product.category || 'Not provided'}</strong>
+              </div>
+              <div>
+                <span style={{ color: '#64748b' }}>Availability:</span>{' '}
+                <strong style={{ color: availabilityColor }}>{availabilityLabel}</strong>
+              </div>
+              <div>
+                <span style={{ color: '#64748b' }}>Listed Date:</span>{' '}
+                <strong style={{ color: '#0f172a' }}>
+                  {product.created_at ? new Date(product.created_at).toLocaleDateString() : 'Not provided'}
+                </strong>
+              </div>
+            </div>
+          </div>
 
           {isReview ? (
             <div className="review">
@@ -151,12 +280,14 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
               identifiable physical product, so no product type has been invented for it.
             </div>
           ) : (
-            <p className="lead">{product.description}</p>
+            <p className="lead" style={{ whiteSpace: 'pre-line' }}>
+              {product.description || 'Handcrafted bespoke resin art item made with high quality materials.'}
+            </p>
           )}
 
           <div className="product-actions">
             <button type="button" onClick={() => onToggleWishlist(product.id)}>
-              {isWishlisted ? '♥ Remove Wishlist' : '♡ Add to Wishlist'}
+              {isWishlisted ? '♥ In Wishlist' : '♡ Add to Wishlist'}
             </button>
             <button type="button" onClick={() => onToggleSave(product.id)}>
               {isSaved ? '🛒 In Saved' : '🛒 Save for Later'}

@@ -159,14 +159,14 @@ const memoryLogs: ActivityLogRecord[] = [
 // PostgreSQL Connection Pool
 const dbConnectionString =
   process.env.DATABASE_URL ||
-  'postgresql://postgres.dmpddhuihvsldhphalom:7LelQEuYAVSdmUPo@aws-0-ap-southeast-2.pooler.supabase.com:6543/postgres';
+  'postgresql://postgres.kfkwudvnkhwooawbjkgb:t7JG8ZiaZbKOWevj@aws-0-ap-southeast-2.pooler.supabase.com:6543/postgres';
 
 let poolInstance: Pool | null = null;
 if (dbConnectionString) {
   try {
     poolInstance = new Pool({
       connectionString: dbConnectionString,
-      ssl: { rejectUnauthorized: false },
+      ssl: dbConnectionString.includes('localhost') ? false : { rejectUnauthorized: false },
       connectionTimeoutMillis: 5000,
       idleTimeoutMillis: 30000,
       max: 10,
@@ -268,43 +268,55 @@ app.use(express.urlencoded({ extended: true, limit: '60mb' }));
   // API ROUTES
   // ==========================================
 
-  // 1. Database Health & Diagnostic Route
+  // 1. Database Health & Diagnostic Route (Optimized Single Query + In-Memory Cache)
+  let cachedDbStatus: any = null;
+  let cachedDbStatusTime = 0;
+
   app.get('/api/db/status', async (_req: Request, res: Response) => {
+    const now = Date.now();
+    if (cachedDbStatus && (now - cachedDbStatusTime) < 4000) {
+      return res.json(cachedDbStatus);
+    }
+
     if (pool) {
       try {
-        const client = await pool.connect();
-        try {
-          await client.query('SET search_path TO public, extensions;');
-          const dbInfo = await client.query('SELECT current_database(), current_user, version();');
-          const itemCount = await client.query('SELECT count(*) FROM public.store_items;');
-          const catCount = await client.query('SELECT count(*) FROM public.categories;');
-          const mediaCount = await client.query('SELECT count(*) FROM public.product_media;');
-          const videoCount = await client.query(
-            "SELECT count(*) FROM public.store_items WHERE video_url IS NOT NULL AND video_url != '';"
-          );
-
-          return res.json({
-            status: 'connected',
-            provider: 'PostgreSQL Database',
-            database: dbInfo.rows[0]?.current_database || 'postgres',
-            user: dbInfo.rows[0]?.current_user || 'postgres',
-            counts: {
-              store_items: parseInt(itemCount.rows[0]?.count || '0', 10),
-              categories: parseInt(catCount.rows[0]?.count || '0', 10),
-              product_media: parseInt(mediaCount.rows[0]?.count || '0', 10),
-              products_with_videos: parseInt(videoCount.rows[0]?.count || '0', 10),
-            },
-            timestamp: new Date().toISOString(),
-          });
-        } finally {
-          client.release();
-        }
+        const query = `
+          SELECT
+            current_database() as database,
+            current_user as user,
+            (SELECT count(*) FROM public.store_items) as store_items,
+            (SELECT count(*) FROM public.store_items WHERE published = true) as published_products,
+            (SELECT count(*) FROM public.categories) as categories,
+            (SELECT count(*) FROM public.product_media) as product_media,
+            (SELECT count(*) FROM public.product_media WHERE media_type = 'image') as total_photos,
+            (SELECT count(*) FROM public.store_items WHERE video_url IS NOT NULL AND video_url != '') as products_with_videos;
+        `;
+        const result = await pool.query(query);
+        const row = result.rows[0] || {};
+        const responseData = {
+          status: 'connected',
+          provider: 'PostgreSQL Database',
+          database: row.database || 'postgres',
+          user: row.user || 'postgres',
+          counts: {
+            store_items: parseInt(row.store_items || '0', 10),
+            published_products: parseInt(row.published_products || '0', 10),
+            categories: parseInt(row.categories || '0', 10),
+            product_media: parseInt(row.product_media || '0', 10),
+            total_photos: parseInt(row.total_photos || '0', 10),
+            products_with_videos: parseInt(row.products_with_videos || '0', 10),
+          },
+          timestamp: new Date().toISOString(),
+        };
+        cachedDbStatus = responseData;
+        cachedDbStatusTime = now;
+        return res.json(responseData);
       } catch (err: any) {
         console.warn('[PostgreSQL DB Query Failed, using in-memory status]:', err.message);
       }
     }
 
-    return res.json({
+    const fallbackData = {
       status: 'connected',
       provider: 'In-Memory Store (AI Studio Sandbox)',
       host: 'localhost',
@@ -313,12 +325,15 @@ app.use(express.urlencoded({ extended: true, limit: '60mb' }));
       user: 'admin',
       counts: {
         store_items: memoryStoreItems.length,
+        published_products: memoryStoreItems.filter((i) => i.published).length,
         categories: memoryCategories.length,
         product_media: memoryMedia.length,
+        total_photos: memoryMedia.filter((m) => m.media_type === 'image').length,
         products_with_videos: memoryStoreItems.filter((i) => Boolean(i.video_url)).length,
       },
       timestamp: new Date().toISOString(),
-    });
+    };
+    return res.json(fallbackData);
   });
 
   // 2. Products / Store Items
@@ -472,15 +487,27 @@ app.use(express.urlencoded({ extended: true, limit: '60mb' }));
   app.get('/api/categories', async (_req: Request, res: Response) => {
     if (pool) {
       try {
-        const result = await pool.query('SELECT * FROM public.categories ORDER BY display_order ASC, name ASC');
+        const query = `
+          SELECT c.*, COALESCE(COUNT(s.id), 0)::int as product_count
+          FROM public.categories c
+          LEFT JOIN public.store_items s ON LOWER(TRIM(s.category)) = LOWER(TRIM(c.name)) AND s.published = true
+          GROUP BY c.id
+          ORDER BY c.display_order ASC, c.name ASC;
+        `;
+        const result = await pool.query(query);
         return res.json(result.rows);
       } catch (err: any) {
         console.warn('[DB GET /api/categories failed, using in-memory]:', err.message);
       }
     }
-    const sorted = [...memoryCategories].sort(
-      (a, b) => a.display_order - b.display_order || a.name.localeCompare(b.name)
-    );
+    const sorted = [...memoryCategories]
+      .map((cat) => ({
+        ...cat,
+        product_count: memoryStoreItems.filter(
+          (i) => i.published && i.category.trim().toLowerCase() === cat.name.trim().toLowerCase()
+        ).length,
+      }))
+      .sort((a, b) => a.display_order - b.display_order || a.name.localeCompare(b.name));
     return res.json(sorted);
   });
 

@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { Product, StoreItem, DrawerType, AdminSession } from './types';
-import { defaultProducts, brandInfo } from './data/products';
+import { Product, StoreItem, DrawerType, AdminSession, CategoryItem } from './types';
+import { defaultProducts, brandInfo, defaultCategories } from './data/products';
 import { loadStorage, saveStorage } from './utils/helpers';
+import { parsePath, slugifyCategory, matchCategoryFromSlug } from './utils/routing';
 import { Header } from './components/Header';
 import { CategoryNav } from './components/CategoryNav';
 import { Hero } from './components/Hero';
@@ -16,7 +17,7 @@ import { Footer } from './components/Footer';
 import { Toast } from './components/Toast';
 import { AdminLogin } from './components/admin/AdminLogin';
 import { AdminDashboard } from './components/admin/AdminDashboard';
-import { getAdminSession, fetchProducts } from './services/supabase';
+import { getAdminSession, fetchProducts, fetchCategories } from './services/supabase';
 
 const STORAGE_KEYS = {
   WISHLIST: 'ak_w',
@@ -29,13 +30,41 @@ const STORAGE_KEYS = {
 const ITEMS_PER_PAGE = 10;
 
 export const App: React.FC = () => {
+  // Synchronously compute initial route from window.location.pathname on first mount
+  const initialRoute = useMemo(() => {
+    if (typeof window === 'undefined') {
+      return {
+        view: 'home' as const,
+        category: 'All',
+        productSlug: null,
+        isCategoryNotFound: false,
+        categorySlugParam: null,
+      };
+    }
+    return parsePath(window.location.pathname, defaultCategories);
+  }, []);
+
   // Navigation & View state
   const [currentView, setCurrentView] = useState<
     'home' | 'catalog' | 'product' | 'videos' | 'admin-login' | 'admin-dashboard'
-  >('home');
+  >(() => initialRoute.view);
   const [adminSession, setAdminSession] = useState<AdminSession | null>(() => getAdminSession());
-  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
-  const [activeCategory, setActiveCategory] = useState<string>('All');
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(() => {
+    if (initialRoute.view === 'product' && initialRoute.productSlug) {
+      return (
+        defaultProducts.find(
+          (p) =>
+            p.slug === initialRoute.productSlug ||
+            p.id.toLowerCase() === initialRoute.productSlug?.toLowerCase()
+        ) || null
+      );
+    }
+    return null;
+  });
+  const [activeCategory, setActiveCategory] = useState<string>(() => initialRoute.category);
+  const [categoryNotFound, setCategoryNotFound] = useState<string | null>(() =>
+    initialRoute.isCategoryNotFound ? (initialRoute.categorySlugParam || initialRoute.category) : null
+  );
   const [homeVideoCategory, setHomeVideoCategory] = useState<string>('All');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [sortBy, setSortBy] = useState<'featured' | 'az' | 'za'>('featured');
@@ -65,6 +94,8 @@ export const App: React.FC = () => {
   const [customItems, setCustomItems] = useState<StoreItem[]>(() =>
     loadStorage<StoreItem[]>(STORAGE_KEYS.CUSTOM_ITEMS, [])
   );
+  const [dbCategories, setDbCategories] = useState<CategoryItem[]>([]);
+  const [isCatalogLoading, setIsCatalogLoading] = useState<boolean>(true);
 
   const showToast = useCallback((msg: string) => {
     setToastMessage(msg);
@@ -170,21 +201,26 @@ export const App: React.FC = () => {
     return list;
   }, [allProducts, customItems]);
 
-  // Unique categories - includes requested primary categories and 'product video'
+  // Unique categories - includes requested primary categories, database categories, and products
   const categories = useMemo(() => {
-    const primary = ['Puja Thali', 'Photo Frames', 'Tray Sets', 'Wall Clocks', ];
+    const primary = ['Puja Thali', 'Photo Frames', 'Tray Sets', 'Wall Clocks'];
     const other = new Set<string>();
+    for (const c of dbCategories) {
+      if (c.name && c.name !== 'Product Image Requires Review' && !primary.includes(c.name)) {
+        other.add(c.name);
+      }
+    }
     for (const p of allProducts) {
       if (p.category && p.category !== 'Product Image Requires Review' && !primary.includes(p.category)) {
         other.add(p.category);
       }
     }
     return ['All', ...primary, ...Array.from(other)];
-  }, [allProducts]);
+  }, [allProducts, dbCategories]);
 
   // Helper to convert category to URL slug
   const categoryToSlug = useCallback((cat: string) => {
-    return cat.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+    return slugifyCategory(cat);
   }, []);
 
   // Up-to-date refs for listener without re-binding effects on every state update
@@ -194,70 +230,34 @@ export const App: React.FC = () => {
   categoriesRef.current = categories;
 
   // URL resolution logic
-  const resolvePath = useCallback(
-    (pathname: string) => {
-      const clean = pathname.toLowerCase().replace(/\/$/, '') || '/';
-      if (clean === '/videos') {
-        setCurrentView('videos');
-        setSelectedProduct(null);
-      } else if (clean === '/admin/login' || clean === '/admin') {
-        setCurrentView('admin-login');
-        setSelectedProduct(null);
-      } else if (clean.startsWith('/admin/dashboard')) {
-        const sess = getAdminSession();
-        if (sess) {
-          setAdminSession(sess);
-          setCurrentView('admin-dashboard');
-        } else {
-          setCurrentView('admin-login');
-        }
-        setSelectedProduct(null);
-      } else if (clean.startsWith('/category/')) {
-        const slug = clean.replace('/category/', '');
-        const currentCats = categoriesRef.current;
-        const matched = currentCats.find(
-          (c) =>
-            categoryToSlug(c) === slug ||
-            c.toLowerCase().trim() === decodeURIComponent(slug).toLowerCase().trim()
-        );
-        if (matched) {
-          setActiveCategory(matched);
-        } else {
-          const formatted = decodeURIComponent(slug)
-            .split('-')
-            .map((s) => s.charAt(0).toUpperCase() + s.slice(1))
-            .join(' ');
-          setActiveCategory(formatted);
-        }
-        setCurrentView('catalog');
-        setSelectedProduct(null);
-        setPage(1);
-      } else if (clean === '/catalog' || clean === '/products') {
-        setActiveCategory('All');
-        setCurrentView('catalog');
-        setSelectedProduct(null);
-        setPage(1);
-      } else if (clean.startsWith('/product/')) {
-        const slug = decodeURIComponent(pathname.replace('/product/', '').replace(/\/$/, ''));
+  const resolvePath = useCallback((pathname: string) => {
+    const parsed = parsePath(pathname, categoriesRef.current);
+    setCurrentView(parsed.view);
+    if (parsed.view === 'catalog') {
+      setActiveCategory(parsed.category);
+      setCategoryNotFound(parsed.isCategoryNotFound ? (parsed.categorySlugParam || parsed.category) : null);
+      setSelectedProduct(null);
+      setPage(1);
+    } else if (parsed.view === 'product') {
+      if (parsed.productSlug) {
         const found = allProductsRef.current.find(
-          (p) => p.slug === slug || p.id.toLowerCase() === slug.toLowerCase()
+          (p) =>
+            p.slug === parsed.productSlug ||
+            p.id.toLowerCase() === parsed.productSlug?.toLowerCase()
         );
         if (found) {
           setSelectedProduct(found);
         }
-        setCurrentView('product');
-      } else {
-        setCurrentView('home');
-        setSelectedProduct(null);
       }
-    },
-    [categoryToSlug]
-  );
+      setCategoryNotFound(null);
+    } else {
+      setSelectedProduct(null);
+      setCategoryNotFound(null);
+    }
+  }, []);
 
-  // Initialize URL routing on mount and handle browser back/forward buttons
+  // Handle browser back/forward buttons seamlessly
   useEffect(() => {
-    resolvePath(window.location.pathname);
-
     const handlePopState = () => {
       resolvePath(window.location.pathname);
     };
@@ -265,6 +265,32 @@ export const App: React.FC = () => {
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
   }, [resolvePath]);
+
+  // Dynamic document title and meta description for SEO
+  useEffect(() => {
+    let title = 'AnmolKala — Handmade Art & Crafts';
+    let desc =
+      'Handmade crafts, personalized gifts, puja thalis, photo frames, resin art clocks and home décor with WhatsApp enquiry.';
+
+    if (currentView === 'catalog') {
+      title = `${activeCategory} Collection — AnmolKala`;
+      desc = `Browse handcrafted ${activeCategory} collection from AnmolKala. Custom resin art, personalized orders and WhatsApp enquiry.`;
+    } else if (currentView === 'product' && selectedProduct) {
+      title = `${selectedProduct.name} — AnmolKala`;
+      desc = selectedProduct.description || `Handcrafted ${selectedProduct.name} by AnmolKala.`;
+    } else if (currentView === 'videos') {
+      title = 'Handmade Craft Demonstration Videos — AnmolKala';
+      desc = 'Watch real handmade craft demonstration videos of resin art, puja thalis, photo frames, and wall clocks.';
+    } else if (currentView === 'admin-login' || currentView === 'admin-dashboard') {
+      title = 'Admin Portal — AnmolKala';
+    }
+
+    document.title = title;
+    const metaDesc = document.querySelector('meta[name="description"]');
+    if (metaDesc) {
+      metaDesc.setAttribute('content', desc);
+    }
+  }, [currentView, activeCategory, selectedProduct]);
 
   // If page was loaded directly on a product page, link selectedProduct once catalog is ready
   useEffect(() => {
@@ -280,13 +306,40 @@ export const App: React.FC = () => {
     }
   }, [allProducts, selectedProduct]);
 
-  // Refresh products from database/server
-  const refreshProducts = useCallback(() => {
-    fetchProducts().then((items) => {
+  // Resolve category if URL was requested directly or if catalog finished loading
+  useEffect(() => {
+    const path = window.location.pathname;
+    if (path.startsWith('/category/') && categories.length > 0) {
+      const rawSlug = path.replace('/category/', '').replace(/\/$/, '');
+      const matched = matchCategoryFromSlug(rawSlug, categories);
+      if (matched) {
+        setActiveCategory(matched);
+        setCategoryNotFound(null);
+      } else if (!isCatalogLoading) {
+        setCategoryNotFound(rawSlug);
+      }
+    }
+  }, [categories, isCatalogLoading]);
+
+  // Refresh products & categories from database/server
+  const refreshProducts = useCallback(async () => {
+    setIsCatalogLoading(true);
+    try {
+      const [items, cats] = await Promise.all([
+        fetchProducts(),
+        fetchCategories(),
+      ]);
       if (items && items.length > 0) {
         setCustomItems(items);
       }
-    });
+      if (cats && cats.length > 0) {
+        setDbCategories(cats);
+      }
+    } catch (err) {
+      console.warn('Error refreshing catalog from server:', err);
+    } finally {
+      setIsCatalogLoading(false);
+    }
   }, []);
 
   // Fetch initial products on mount
@@ -296,17 +349,22 @@ export const App: React.FC = () => {
 
   // Navigation handlers
   const handleGoHome = useCallback(() => {
-    window.history.pushState({ view: 'home' }, '', '/');
+    try {
+      window.history.pushState({ view: 'home' }, '', '/');
+    } catch (e) {}
     setCurrentView('home');
     setSelectedProduct(null);
     setSearchQuery('');
     setActiveCategory('All');
+    setCategoryNotFound(null);
     setPage(1);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, []);
 
   const handleOpenProduct = useCallback((product: Product) => {
-    window.history.pushState({ view: 'product', slug: product.slug }, '', `/product/${product.slug}`);
+    try {
+      window.history.pushState({ view: 'product', slug: product.slug }, '', `/product/${product.slug}`);
+    } catch (e) {}
     setSelectedProduct(product);
     setCurrentView('product');
     // Add to recently viewed
@@ -317,33 +375,43 @@ export const App: React.FC = () => {
   const handleSelectCategory = useCallback(
     (cat: string) => {
       setActiveCategory(cat);
+      setCategoryNotFound(null);
       setSearchQuery('');
       setPage(1);
       setCurrentView('catalog');
       setSelectedProduct(null);
-      if (cat === 'All') {
-        window.history.pushState({ view: 'catalog', category: 'All' }, '', '/catalog');
-      } else {
-        const slug = categoryToSlug(cat);
-        window.history.pushState({ view: 'catalog', category: cat }, '', `/category/${slug}`);
+      try {
+        if (cat === 'All') {
+          window.history.pushState({ view: 'catalog', category: 'All' }, '', '/catalog');
+        } else {
+          const slug = slugifyCategory(cat);
+          window.history.pushState({ view: 'catalog', category: cat }, '', `/category/${slug}`);
+        }
+      } catch (err) {
+        console.warn('pushState error:', err);
       }
       window.scrollTo({ top: 0, behavior: 'smooth' });
     },
-    [categoryToSlug]
+    []
   );
 
   const handleShowAllProducts = useCallback(() => {
     setActiveCategory('All');
+    setCategoryNotFound(null);
     setSearchQuery('');
     setPage(1);
     setCurrentView('catalog');
     setSelectedProduct(null);
-    window.history.pushState({ view: 'catalog', category: 'All' }, '', '/catalog');
+    try {
+      window.history.pushState({ view: 'catalog', category: 'All' }, '', '/catalog');
+    } catch (e) {}
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, []);
 
   const handleShowVideos = useCallback(() => {
-    window.history.pushState({ view: 'videos' }, '', '/videos');
+    try {
+      window.history.pushState({ view: 'videos' }, '', '/videos');
+    } catch (e) {}
     setCurrentView('videos');
     setSelectedProduct(null);
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -421,21 +489,22 @@ export const App: React.FC = () => {
     if (activeCategory === 'product video' || activeCategory === 'Product Videos') {
       list = list.filter((p) => Boolean(p.video_url));
     } else if (activeCategory !== 'All') {
-      list = list.filter((p) => p.category === activeCategory);
+      const targetNorm = activeCategory.trim().toLowerCase();
+      list = list.filter((p) => (p.category || '').trim().toLowerCase() === targetNorm);
     }
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase().trim();
       list = list.filter((p) => {
-        const text = `${p.name} ${p.category} ${p.tags} ${p.description}`.toLowerCase();
+        const text = `${p.name || ''} ${p.category || ''} ${p.tags || ''} ${p.description || ''}`.toLowerCase();
         return text.includes(q);
       });
     }
 
     const sorted = [...list];
     if (sortBy === 'az') {
-      sorted.sort((a, b) => a.name.localeCompare(b.name));
+      sorted.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
     } else if (sortBy === 'za') {
-      sorted.sort((a, b) => b.name.localeCompare(a.name));
+      sorted.sort((a, b) => (b.name || '').localeCompare(a.name || ''));
     }
     return sorted;
   }, [allProducts, activeCategory, searchQuery, sortBy]);
@@ -501,11 +570,28 @@ export const App: React.FC = () => {
   const categorySummary = useMemo(() => {
     const valid = allProducts.filter((p) => p.category !== 'Product Image Requires Review');
     const map = new Map<string, number>();
+
+    // Count products per category
     for (const p of valid) {
-      map.set(p.category, (map.get(p.category) || 0) + 1);
+      const cat = p.category ? p.category.trim() : '';
+      if (cat) {
+        map.set(cat, (map.get(cat) || 0) + 1);
+      }
     }
-    return Array.from(map.entries()).map(([cat, count]) => ({ cat, count }));
-  }, [allProducts]);
+
+    // Include database categories if present
+    for (const c of dbCategories) {
+      if (c.name && c.name !== 'Product Image Requires Review' && !map.has(c.name.trim())) {
+        if (c.product_count && c.product_count > 0) {
+          map.set(c.name.trim(), c.product_count);
+        }
+      }
+    }
+
+    return Array.from(map.entries())
+      .filter(([_, count]) => count > 0)
+      .map(([cat, count]) => ({ cat, count }));
+  }, [allProducts, dbCategories]);
 
   // Distinct categories present in videos for home filter
   const homeVideoCategories = useMemo(() => {
@@ -934,59 +1020,144 @@ export const App: React.FC = () => {
 
         {currentView === 'catalog' && (
           <section className="section" id="catalog">
-            <div className="head">
-              <div>
-                <h2>{activeCategory === 'All' ? 'All Products' : activeCategory}</h2>
-                <div className="muted">
-                  {filteredProducts.length
-                    ? `${filteredProducts.length} products · Showing ${
-                        (validPage - 1) * ITEMS_PER_PAGE + 1
-                      }-${Math.min(validPage * ITEMS_PER_PAGE, filteredProducts.length)}`
-                    : '0 products'}
+            {isCatalogLoading && filteredProducts.length === 0 ? (
+              <div style={{ padding: '20px 0' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                  <div style={{ height: '28px', width: '220px', background: '#e2e8f0', borderRadius: '6px', animation: 'pulse 1.5s infinite' }} />
+                  <div style={{ height: '36px', width: '130px', background: '#e2e8f0', borderRadius: '6px', animation: 'pulse 1.5s infinite' }} />
+                </div>
+                <div className="grid">
+                  {Array.from({ length: 10 }).map((_, i) => (
+                    <div key={i} className="card" style={{ padding: '10px' }}>
+                      <div style={{ aspectRatio: '1/1', background: '#f1f5f9', borderRadius: '4px', animation: 'pulse 1.5s infinite' }} />
+                      <div style={{ height: '12px', width: '40%', background: '#f1f5f9', margin: '10px 0 6px', borderRadius: '4px', animation: 'pulse 1.5s infinite' }} />
+                      <div style={{ height: '16px', width: '85%', background: '#f1f5f9', borderRadius: '4px', animation: 'pulse 1.5s infinite' }} />
+                    </div>
+                  ))}
                 </div>
               </div>
-
-              <select
-                className="select"
-                value={sortBy}
-                onChange={(e) => {
-                  setSortBy(e.target.value as 'featured' | 'az' | 'za');
-                  setPage(1);
+            ) : categoryNotFound ? (
+              <div
+                style={{
+                  textAlign: 'center',
+                  padding: '50px 20px',
+                  background: '#faf8f5',
+                  borderRadius: '8px',
+                  border: '1px solid #e7e2d8',
                 }}
               >
-                <option value="featured">Featured</option>
-                <option value="az">Name A–Z</option>
-                <option value="za">Name Z–A</option>
-              </select>
-            </div>
-
-            <div className="grid">
-              {catalogSlice.length > 0 ? (
-                catalogSlice.map((p) => (
-                  <ProductCard
-                    key={p.id}
-                    product={p}
-                    whatsappNumber={brandInfo.whatsapp}
-                    isWishlisted={wishlist.includes(p.id)}
-                    onToggleWishlist={handleToggleWishlist}
-                    onOpenProduct={handleOpenProduct}
-                    onCompare={handleToggleCompare}
-                    variant="full"
-                  />
-                ))
-              ) : (
-                <div
-                  style={{
-                    gridColumn: '1/-1',
-                    textAlign: 'center',
-                    padding: '55px',
-                    color: '#6b7685',
-                  }}
-                >
-                  No matching products. Try another search or category.
+                <div style={{ fontSize: '38px', marginBottom: '10px' }}>🔍</div>
+                <h2 style={{ fontSize: '22px', fontWeight: 800, margin: '0 0 8px', color: '#182235' }}>
+                  Collection "{categoryNotFound}" Not Found
+                </h2>
+                <p style={{ color: '#64748b', fontSize: '14px', maxWidth: '480px', margin: '0 auto 20px', lineHeight: 1.5 }}>
+                  We couldn't find a category matching this name. Choose any collection below or browse all handcrafted products.
+                </p>
+                <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', flexWrap: 'wrap', maxWidth: '650px', margin: '0 auto 24px' }}>
+                  {categories.filter((c) => c !== 'All').slice(0, 8).map((c) => (
+                    <button
+                      key={c}
+                      type="button"
+                      className="cat"
+                      onClick={() => handleSelectCategory(c)}
+                      style={{ fontSize: '12px', padding: '6px 14px' }}
+                    >
+                      {c}
+                    </button>
+                  ))}
                 </div>
-              )}
-            </div>
+                <div style={{ display: 'flex', gap: '10px', justifyContent: 'center', flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    className="cta"
+                    onClick={handleShowAllProducts}
+                    style={{ padding: '10px 18px', fontSize: '13px' }}
+                  >
+                    View All Products →
+                  </button>
+                  <button
+                    type="button"
+                    className="select"
+                    onClick={handleGoHome}
+                    style={{ padding: '10px 18px', fontSize: '13px', border: '1px solid #cbd5e1' }}
+                  >
+                    Return Home
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className="head">
+                  <div>
+                    <h2>{activeCategory === 'All' ? 'All Products' : activeCategory}</h2>
+                    <div className="muted">
+                      {filteredProducts.length
+                        ? `${filteredProducts.length} products · Showing ${
+                            (validPage - 1) * ITEMS_PER_PAGE + 1
+                          }-${Math.min(validPage * ITEMS_PER_PAGE, filteredProducts.length)}`
+                        : '0 products'}
+                    </div>
+                  </div>
+
+                  <select
+                    className="select"
+                    value={sortBy}
+                    onChange={(e) => {
+                      setSortBy(e.target.value as 'featured' | 'az' | 'za');
+                      setPage(1);
+                    }}
+                  >
+                    <option value="featured">Featured</option>
+                    <option value="az">Name A–Z</option>
+                    <option value="za">Name Z–A</option>
+                  </select>
+                </div>
+
+                <div className="grid">
+                  {catalogSlice.length > 0 ? (
+                    catalogSlice.map((p) => (
+                      <ProductCard
+                        key={p.id}
+                        product={p}
+                        whatsappNumber={brandInfo.whatsapp}
+                        isWishlisted={wishlist.includes(p.id)}
+                        onToggleWishlist={handleToggleWishlist}
+                        onOpenProduct={handleOpenProduct}
+                        onCompare={handleToggleCompare}
+                        variant="full"
+                      />
+                    ))
+                  ) : (
+                    <div
+                      style={{
+                        gridColumn: '1/-1',
+                        textAlign: 'center',
+                        padding: '60px 20px',
+                        background: '#f8fafc',
+                        borderRadius: '8px',
+                        border: '1px dashed #cbd5e1',
+                      }}
+                    >
+                      <div style={{ fontSize: '32px', marginBottom: '8px' }}>📦</div>
+                      <div style={{ fontSize: '16px', fontWeight: 700, color: '#1e293b', marginBottom: '4px' }}>
+                        No items in {activeCategory}
+                      </div>
+                      <p style={{ color: '#64748b', fontSize: '13px', margin: '0 0 16px' }}>
+                        Products for this category are being prepared. Check our other collections.
+                      </p>
+                      <button
+                        type="button"
+                        className="cta"
+                        onClick={handleShowAllProducts}
+                        style={{ padding: '8px 16px', fontSize: '12px' }}
+                      >
+                        Browse All Products
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
 
             {totalPages > 1 && (
               <div className="pager">

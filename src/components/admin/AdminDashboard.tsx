@@ -17,6 +17,7 @@ import {
   fetchMediaItems,
   uploadMediaFile,
   deleteMediaItem,
+  deleteProductVideoOnly,
   logoutAdmin,
   updateAdminPassword,
   generateUniqueId,
@@ -42,41 +43,83 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [products, setProducts] = useState<StoreItem[]>([]);
   const [categories, setCategories] = useState<CategoryItem[]>([]);
   const [mediaList, setMediaList] = useState<MediaItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [isInitialLoading, setIsInitialLoading] = useState(true);
+  const [dataError, setDataError] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [dbStatus, setDbStatus] = useState<DatabaseStatus | null>(null);
 
   // Search & Filters in Product Management
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
+  const [typeFilter, setTypeFilter] = useState<'all' | 'photo' | 'video'>('all');
   const [availabilityFilter, setAvailabilityFilter] = useState('all');
+  const [publishedFilter, setPublishedFilter] = useState<'all' | 'published' | 'draft'>('all');
 
-  // Edit / Add Product Form State
-  const [isAddingNew, setIsAddingNew] = useState(false);
+  // Edit / Add Photo Product State
   const [editingItem, setEditingItem] = useState<StoreItem | null>(null);
-  const [formName, setFormName] = useState('');
-  const [formCategory, setFormCategory] = useState('');
-  const [formDescription, setFormDescription] = useState('');
-  const [formAvailability, setFormAvailability] = useState<ProductAvailability>('in_stock');
-  const [formTags, setFormTags] = useState('');
-  const [formPhotoFiles, setFormPhotoFiles] = useState<File[]>([]);
-  const [formPhotoPreviews, setFormPhotoPreviews] = useState<string[]>([]);
-  const [formExistingPhoto, setFormExistingPhoto] = useState<string>('');
-  const [formVideoFile, setFormVideoFile] = useState<File | null>(null);
-  const [formVideoPreview, setFormVideoPreview] = useState<string>('');
-  const [formExistingVideo, setFormExistingVideo] = useState<string>('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [formNewCategoryInline, setFormNewCategoryInline] = useState(false);
-  const [formNewCategoryName, setFormNewCategoryName] = useState('');
+  const [photoFormName, setPhotoFormName] = useState('');
+  const [photoFormCategory, setPhotoFormCategory] = useState('');
+  const [photoFormDesc, setPhotoFormDesc] = useState('');
+  const [photoFormAvailability, setPhotoFormAvailability] = useState<ProductAvailability>('in_stock');
+  const [photoFormPublished, setPhotoFormPublished] = useState(true);
+  const [photoFormTags, setPhotoFormTags] = useState('');
+  const [photoFormFiles, setPhotoFormFiles] = useState<File[]>([]);
+  const [photoFormPreviews, setPhotoFormPreviews] = useState<string[]>([]);
+  const [photoFormCoverIndex, setPhotoFormCoverIndex] = useState(0);
+  const [photoFormExistingCover, setPhotoFormExistingCover] = useState('');
+  const [photoFormNewCatInline, setPhotoFormNewCatInline] = useState(false);
+  const [photoFormNewCatName, setPhotoFormNewCatName] = useState('');
+  const [isPhotoFormSubmitting, setIsPhotoFormSubmitting] = useState(false);
+  const photoFormPickerRef = useRef<HTMLInputElement | null>(null);
 
-  // Confirmation Modals
+  // Add Video Product State
+  const [videoFormName, setVideoFormName] = useState('');
+  const [videoFormCategory, setVideoFormCategory] = useState('');
+  const [videoFormDesc, setVideoFormDesc] = useState('');
+  const [videoFormAvailability, setVideoFormAvailability] = useState<ProductAvailability>('in_stock');
+  const [videoFormPublished, setVideoFormPublished] = useState(true);
+  const [videoFormTags, setVideoFormTags] = useState('');
+  const [videoFormPhotoFile, setVideoFormPhotoFile] = useState<File | null>(null);
+  const [videoFormPhotoPreview, setVideoFormPhotoPreview] = useState<string>('');
+  const [videoFormVideoFile, setVideoFormVideoFile] = useState<File | null>(null);
+  const [videoFormVideoPreview, setVideoFormVideoPreview] = useState<string>('');
+  const [videoFormFileSize, setVideoFormFileSize] = useState<string>('');
+  const [videoFormNewCatInline, setVideoFormNewCatInline] = useState(false);
+  const [videoFormNewCatName, setVideoFormNewCatName] = useState('');
+  const [videoPhotoError, setVideoPhotoError] = useState(false);
+  const [isVideoFormSubmitting, setIsVideoFormSubmitting] = useState(false);
+  const videoFormPhotoPickerRef = useRef<HTMLInputElement | null>(null);
+  const videoFormVideoPickerRef = useRef<HTMLInputElement | null>(null);
+
+  // Product Details Quick View Modal State
+  const [viewDetailsItem, setViewDetailsItem] = useState<StoreItem | null>(null);
+
+  // Video Player / View Modal State
+  const [playingVideo, setPlayingVideo] = useState<{
+    url: string;
+    title: string;
+    productName?: string;
+    productId?: string;
+    category?: string;
+  } | null>(null);
+
+  // Video Edit Modal State
+  const [editingVideoItem, setEditingVideoItem] = useState<{
+    id: string;
+    productId: string;
+    title: string;
+    description: string;
+    category: string;
+    video_url: string;
+  } | null>(null);
+  const [editVideoFile, setEditVideoFile] = useState<File | null>(null);
+  const [editVideoPreview, setEditVideoPreview] = useState<string>('');
+
+  // Confirmation Modals State
   const [productToDelete, setProductToDelete] = useState<StoreItem | null>(null);
-  const [mediaToDelete, setMediaToDelete] = useState<MediaItem | null>(null);
-
-  // Quick Action File Pickers
-  const [quickUploadProductId, setQuickUploadProductId] = useState<string | null>(null);
-  const quickPhotoPickerRef = useRef<HTMLInputElement | null>(null);
-  const quickVideoPickerRef = useRef<HTMLInputElement | null>(null);
+  const [videoToDelete, setVideoToDelete] = useState<{ productId: string; mediaId?: string; title: string } | null>(null);
+  const [photoToDelete, setPhotoToDelete] = useState<MediaItem | null>(null);
 
   // Dedicated Photo Upload Center State
   const [photoUploadFiles, setPhotoUploadFiles] = useState<File[]>([]);
@@ -85,29 +128,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [photoUploading, setPhotoUploading] = useState(false);
   const dedicatedPhotoPickerRef = useRef<HTMLInputElement | null>(null);
 
-  // Dedicated Video Upload Center State
-  const [videoUploadFile, setVideoUploadFile] = useState<File | null>(null);
-  const [videoUploadPreview, setVideoUploadPreview] = useState<string>('');
-  const [videoTargetProduct, setVideoTargetProduct] = useState<string>('');
-  const [videoUploading, setVideoUploading] = useState(false);
-  const dedicatedVideoPickerRef = useRef<HTMLInputElement | null>(null);
-
-  // Categories Manager State
+  // Category Manager State
   const [categoryInputName, setCategoryInputName] = useState('');
   const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
   const [editingCategoryName, setEditingCategoryName] = useState('');
-
-  // Media Library filter
-  const [mediaFilter, setMediaFilter] = useState<'all' | 'image' | 'video'>('all');
 
   // Settings / Password Form State
   const [passCurrent, setPassCurrent] = useState('');
   const [passNew, setPassNew] = useState('');
   const [passConfirm, setPassConfirm] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
   const [passLoading, setPassLoading] = useState(false);
 
-  // Helper for notification toast
+  // Notification Toast Helper
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => {
@@ -115,9 +147,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }, 3500);
   };
 
-  // Load All Data from Supabase
-  const loadData = async () => {
-    setLoading(true);
+  // Load All Data from Database
+  const loadData = async (isBackground = false) => {
+    if (!isBackground) {
+      setLoading(true);
+      setDataError(null);
+    }
     try {
       const [prods, cats, medias, dbInfo] = await Promise.all([
         fetchProducts(),
@@ -129,10 +164,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       setCategories(cats);
       setMediaList(medias);
       setDbStatus(dbInfo);
-    } catch (e) {
+      setDataError(null);
+    } catch (e: any) {
+      if (!isBackground) {
+        setDataError(e.message || 'Could not load database records.');
+      }
       showToast('Could not load database records. Using offline copy.');
     } finally {
       setLoading(false);
+      setIsInitialLoading(false);
     }
   };
 
@@ -140,10 +180,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     loadData();
   }, []);
 
-  // Summary counts
-  const totalProducts = products.filter((p) => p.type !== 'video').length;
-  const totalPhotos = mediaList.filter((m) => m.media_type === 'image').length;
-  const totalVideos = products.filter((p) => Boolean(p.video_url)).length;
+  // Database Aggregate Counts (never default to false 0 when loading)
+  const isCountsLoading = isInitialLoading && !dbStatus && products.length === 0;
+  const totalProducts = isCountsLoading ? null : (dbStatus?.counts?.store_items ?? products.length);
+  const publishedProducts = isCountsLoading
+    ? null
+    : (dbStatus?.counts?.published_products ?? products.filter((p) => p.published !== false).length);
+  const totalPhotos = isCountsLoading
+    ? null
+    : (dbStatus?.counts?.total_photos ?? (mediaList.filter((m) => m.media_type === 'image').length || products.length));
+  const totalVideos = isCountsLoading
+    ? null
+    : (dbStatus?.counts?.products_with_videos ?? products.filter((p) => Boolean(p.video_url)).length);
+  const totalCategories = isCountsLoading ? null : (dbStatus?.counts?.categories ?? categories.length);
 
   // Filtered products in Manage Products
   const filteredProducts = useMemo(() => {
@@ -156,7 +205,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         p.category.toLowerCase().includes(q) ||
         p.tags.toLowerCase().includes(q);
 
-      const matchCat = categoryFilter === 'all' || p.category === categoryFilter;
+      const matchCat = categoryFilter === 'all' || p.category.toLowerCase() === categoryFilter.toLowerCase();
+
+      const matchType =
+        typeFilter === 'all' ||
+        (typeFilter === 'video' && Boolean(p.video_url)) ||
+        (typeFilter === 'photo' && !p.video_url);
 
       const matchAvail =
         availabilityFilter === 'all' ||
@@ -164,93 +218,114 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         (availabilityFilter === 'made_to_order' && p.availability === 'made_to_order') ||
         (availabilityFilter === 'out_of_stock' && p.availability === 'out_of_stock');
 
-      return matchQuery && matchCat && matchAvail;
+      const matchPublished =
+        publishedFilter === 'all' ||
+        (publishedFilter === 'published' && p.published !== false) ||
+        (publishedFilter === 'draft' && p.published === false);
+
+      return matchQuery && matchCat && matchType && matchAvail && matchPublished;
     });
-  }, [products, searchQuery, categoryFilter, availabilityFilter]);
+  }, [products, searchQuery, categoryFilter, typeFilter, availabilityFilter, publishedFilter]);
 
-  // Open Add Product Form
-  const handleOpenAddProduct = () => {
+  // All attached or uploaded craft videos
+  const allVideos = useMemo(() => {
+    const list: Array<{
+      id: string;
+      productId: string;
+      productName: string;
+      category: string;
+      video_url: string;
+      image_url?: string;
+      description?: string;
+      created_at?: string;
+    }> = [];
+    const seen = new Set<string>();
+
+    for (const p of products) {
+      if (p.video_url && !seen.has(p.video_url)) {
+        seen.add(p.video_url);
+        list.push({
+          id: `vid-${p.id}`,
+          productId: p.id,
+          productName: p.name,
+          category: p.category,
+          video_url: p.video_url,
+          image_url: p.image_url,
+          description: p.description,
+          created_at: p.created_at,
+        });
+      }
+    }
+
+    for (const m of mediaList) {
+      if (m.media_type === 'video' && m.storage_path && !seen.has(m.storage_path)) {
+        seen.add(m.storage_path);
+        const parent = products.find((p) => p.id === m.product_id);
+        list.push({
+          id: m.id,
+          productId: m.product_id,
+          productName: m.product_name || parent?.name || m.product_id,
+          category: parent?.category || 'General',
+          video_url: m.storage_path,
+          image_url: parent?.image_url,
+          created_at: m.created_at,
+        });
+      }
+    }
+
+    return list;
+  }, [products, mediaList]);
+
+  // ==========================================
+  // ADD PHOTO PRODUCT HANDLERS
+  // ==========================================
+  const handleOpenAddPhotoProduct = () => {
     setEditingItem(null);
-    setIsAddingNew(true);
-    setFormName('');
-    setFormCategory(categories[0]?.name || 'Puja Thali');
-    setFormDescription('');
-    setFormAvailability('in_stock');
-    setFormTags('');
-    setFormPhotoFiles([]);
-    setFormPhotoPreviews([]);
-    setFormExistingPhoto('');
-    setFormVideoFile(null);
-    setFormVideoPreview('');
-    setFormExistingVideo('');
-    setFormNewCategoryInline(false);
-    setFormNewCategoryName('');
-    setActiveSection('add-product');
+    setPhotoFormName('');
+    setPhotoFormCategory(categories[0]?.name || 'Puja Thali');
+    setPhotoFormDesc('');
+    setPhotoFormAvailability('in_stock');
+    setPhotoFormPublished(true);
+    setPhotoFormTags('');
+    setPhotoFormFiles([]);
+    setPhotoFormPreviews([]);
+    setPhotoFormCoverIndex(0);
+    setPhotoFormExistingCover('');
+    setPhotoFormNewCatInline(false);
+    setPhotoFormNewCatName('');
+    setActiveSection('add-photo-product');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  // Open Edit Product Form
-  const handleOpenEditProduct = (p: StoreItem) => {
-    setEditingItem(p);
-    setIsAddingNew(false);
-    setFormName(p.name);
-    setFormCategory(p.category);
-    setFormDescription(p.description);
-    setFormAvailability(p.availability || 'in_stock');
-    setFormTags(p.tags || '');
-    setFormPhotoFiles([]);
-    setFormPhotoPreviews([]);
-    setFormExistingPhoto(p.image_url || '/logo.png');
-    setFormVideoFile(null);
-    setFormVideoPreview('');
-    setFormExistingVideo(p.video_url || '');
-    setFormNewCategoryInline(false);
-    setFormNewCategoryName('');
-    setActiveSection('add-product');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
-
-  // Select photos for Add/Edit Form
-  const handleSelectFormPhotos = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleSelectPhotoFormFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     if (!files.length) return;
 
-    setFormPhotoFiles((prev) => [...prev, ...files]);
+    setPhotoFormFiles((prev) => [...prev, ...files]);
 
     files.forEach((file) => {
       const reader = new FileReader();
       reader.onload = (loadEv) => {
         if (loadEv.target?.result) {
-          setFormPhotoPreviews((prev) => [...prev, String(loadEv.target?.result)]);
+          setPhotoFormPreviews((prev) => [...prev, String(loadEv.target?.result)]);
         }
       };
       reader.readAsDataURL(file);
     });
   };
 
-  // Select video for Add/Edit Form
-  const handleSelectFormVideo = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setFormVideoFile(file);
-    const blobUrl = URL.createObjectURL(file);
-    setFormVideoPreview(blobUrl);
-  };
-
-  // Save Product (Create or Edit)
-  const handleSaveProductForm = async (e: React.FormEvent) => {
+  const handleSavePhotoProduct = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formName.trim()) {
+    if (!photoFormName.trim()) {
       showToast('Please enter a product name.');
       return;
     }
 
-    setIsSubmitting(true);
+    setIsPhotoFormSubmitting(true);
     try {
-      let finalCategory = formCategory;
-      if (formNewCategoryInline && formNewCategoryName.trim()) {
-        finalCategory = formNewCategoryName.trim();
+      let finalCategory = photoFormCategory;
+      if (photoFormNewCatInline && photoFormNewCatName.trim()) {
+        finalCategory = photoFormNewCatName.trim();
         await saveCategory({
           id: `CAT-${Date.now().toString(36).toUpperCase()}`,
           name: finalCategory,
@@ -259,67 +334,199 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       }
 
       const productId = editingItem ? editingItem.id : generateUniqueId('AK');
-      const slug = `${formName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')}-${productId.toLowerCase()}`;
+      const slug = `${photoFormName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')}-${productId.toLowerCase()}`;
 
-      let finalImageUrl = formExistingPhoto || '/logo.png';
-      let finalVideoUrl = formExistingVideo || '';
+      let finalCoverUrl = photoFormExistingCover || '/logo.png';
 
-      // Upload photos if newly selected
-      if (formPhotoFiles.length > 0) {
-        for (const file of formPhotoFiles) {
-          const media = await uploadMediaFile(file, productId, 'image');
-          if (media.storage_path) {
-            finalImageUrl = media.storage_path;
+      // Upload selected files
+      if (photoFormFiles.length > 0) {
+        for (let i = 0; i < photoFormFiles.length; i++) {
+          const media = await uploadMediaFile(photoFormFiles[i], productId, 'image');
+          if (i === photoFormCoverIndex && media.storage_path) {
+            finalCoverUrl = media.storage_path;
+          } else if (i === 0 && !finalCoverUrl) {
+            finalCoverUrl = media.storage_path;
           }
         }
       }
 
-      // Upload video if newly selected
-      if (formVideoFile) {
-        const media = await uploadMediaFile(formVideoFile, productId, 'video');
-        if (media.storage_path) {
-          finalVideoUrl = media.storage_path;
-        }
-      }
-
-      const productPayload: StoreItem = {
+      const payload: StoreItem = {
         id: productId,
         type: 'product',
-        name: formName.trim(),
+        name: photoFormName.trim(),
         category: finalCategory || 'Puja Thali',
         slug,
-        description: formDescription.trim(),
-        image_url: finalImageUrl,
-        video_url: finalVideoUrl,
-        tags: formTags.trim() || `${formName} handmade craft resin`,
-        published: true,
-        availability: formAvailability,
+        description: photoFormDesc.trim(),
+        image_url: finalCoverUrl,
+        video_url: editingItem?.video_url || '',
+        tags: photoFormTags.trim() || `${photoFormName} handmade craft resin`,
+        published: photoFormPublished,
+        availability: photoFormAvailability,
         created_at: editingItem?.created_at || new Date().toISOString(),
         updated_at: new Date().toISOString(),
       };
 
-      const saved = await saveProduct(productPayload);
-
-      // Update state
-      setProducts((prev) => {
-        const idx = prev.findIndex((p) => p.id === saved.id);
-        if (idx >= 0) {
-          const copy = [...prev];
-          copy[idx] = saved;
-          return copy;
-        }
-        return [saved, ...prev];
-      });
-
-      showToast(editingItem ? 'Product updated successfully.' : 'Product added successfully! It is now live on your website.');
+      await saveProduct(payload);
+      showToast(editingItem ? 'Product updated successfully!' : 'Photo Product added successfully!');
       setActiveSection('products');
-      setIsAddingNew(false);
-      setEditingItem(null);
-      loadData();
+      loadData(true);
     } catch (err: any) {
-      showToast(`Could not save product: ${err?.message || 'Please check your connection and try again.'}`);
+      showToast(`Error saving product: ${err.message}`);
     } finally {
-      setIsSubmitting(false);
+      setIsPhotoFormSubmitting(false);
+    }
+  };
+
+  // ==========================================
+  // ADD VIDEO PRODUCT HANDLERS (WITH MANDATORY PHOTO)
+  // ==========================================
+  const handleOpenAddVideoProduct = () => {
+    setVideoFormName('');
+    setVideoFormCategory(categories[0]?.name || 'Puja Thali');
+    setVideoFormDesc('');
+    setVideoFormAvailability('in_stock');
+    setVideoFormPublished(true);
+    setVideoFormTags('');
+    setVideoFormPhotoFile(null);
+    setVideoFormPhotoPreview('');
+    setVideoFormVideoFile(null);
+    setVideoFormVideoPreview('');
+    setVideoFormFileSize('');
+    setVideoFormNewCatInline(false);
+    setVideoFormNewCatName('');
+    setVideoPhotoError(false);
+    setActiveSection('add-video-product');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleSelectVideoPhoto = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setVideoFormPhotoFile(file);
+    setVideoPhotoError(false);
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      if (ev.target?.result) setVideoFormPhotoPreview(String(ev.target.result));
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleSelectVideoFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setVideoFormVideoFile(file);
+    const sizeMb = (file.size / (1024 * 1024)).toFixed(1);
+    setVideoFormFileSize(`${sizeMb} MB`);
+    const blobUrl = URL.createObjectURL(file);
+    setVideoFormVideoPreview(blobUrl);
+  };
+
+  const handleSaveVideoProduct = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!videoFormName.trim()) {
+      showToast('Please enter a product name.');
+      return;
+    }
+
+    // MANDATORY PHOTO VALIDATION
+    if (!videoFormPhotoFile && videoFormPublished) {
+      setVideoPhotoError(true);
+      showToast('Please add at least one product photo before publishing this video product.');
+      return;
+    }
+
+    if (!videoFormVideoFile) {
+      showToast('Please select a video file.');
+      return;
+    }
+
+    setIsVideoFormSubmitting(true);
+    try {
+      let finalCategory = videoFormCategory;
+      if (videoFormNewCatInline && videoFormNewCatName.trim()) {
+        finalCategory = videoFormNewCatName.trim();
+        await saveCategory({
+          id: `CAT-${Date.now().toString(36).toUpperCase()}`,
+          name: finalCategory,
+          display_order: categories.length,
+        });
+      }
+
+      const productId = generateUniqueId('AK');
+      const slug = `${videoFormName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')}-${productId.toLowerCase()}`;
+
+      // Upload mandatory photo
+      let photoUrl = '/logo.png';
+      if (videoFormPhotoFile) {
+        const photoMedia = await uploadMediaFile(videoFormPhotoFile, productId, 'image');
+        if (photoMedia.storage_path) photoUrl = photoMedia.storage_path;
+      }
+
+      // Upload video file
+      let videoUrl = '';
+      if (videoFormVideoFile) {
+        const videoMedia = await uploadMediaFile(videoFormVideoFile, productId, 'video');
+        if (videoMedia.storage_path) videoUrl = videoMedia.storage_path;
+      }
+
+      const payload: StoreItem = {
+        id: productId,
+        type: 'product',
+        name: videoFormName.trim(),
+        category: finalCategory || 'Puja Thali',
+        slug,
+        description: videoFormDesc.trim() || `Handcrafted video demonstration for ${videoFormName.trim()}.`,
+        image_url: photoUrl,
+        video_url: videoUrl,
+        tags: videoFormTags.trim() || `${videoFormName} craft video resin handmade`,
+        published: videoFormPublished,
+        availability: videoFormAvailability,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+
+      await saveProduct(payload);
+      showToast('Video Product published successfully!');
+      setActiveSection('products');
+      loadData(true);
+    } catch (err: any) {
+      showToast(`Error publishing video product: ${err.message}`);
+    } finally {
+      setIsVideoFormSubmitting(false);
+    }
+  };
+
+  // ==========================================
+  // EDIT PRODUCT HANDLER
+  // ==========================================
+  const handleOpenEditProduct = (p: StoreItem) => {
+    setEditingItem(p);
+    setPhotoFormName(p.name);
+    setPhotoFormCategory(p.category);
+    setPhotoFormDesc(p.description);
+    setPhotoFormAvailability(p.availability || 'in_stock');
+    setPhotoFormPublished(p.published !== false);
+    setPhotoFormTags(p.tags || '');
+    setPhotoFormFiles([]);
+    setPhotoFormPreviews([]);
+    setPhotoFormCoverIndex(0);
+    setPhotoFormExistingCover(p.image_url || '/logo.png');
+    setPhotoFormNewCatInline(false);
+    setPhotoFormNewCatName('');
+    setActiveSection('add-photo-product');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  // Toggle Publish Status
+  const handleTogglePublish = async (p: StoreItem) => {
+    try {
+      const updated: StoreItem = { ...p, published: !p.published };
+      await saveProduct(updated);
+      setProducts((prev) => prev.map((item) => (item.id === p.id ? updated : item)));
+      showToast(updated.published ? `"${p.name}" is now Published.` : `"${p.name}" moved to Draft.`);
+    } catch (e: any) {
+      showToast(`Error updating publish status: ${e.message}`);
     }
   };
 
@@ -329,100 +536,59 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     try {
       await deleteProduct(productToDelete.id);
       setProducts((prev) => prev.filter((p) => p.id !== productToDelete.id));
-      showToast(`"${productToDelete.name}" has been deleted.`);
+      showToast(`Product "${productToDelete.name}" deleted.`);
+      loadData(true);
     } catch (e: any) {
-      showToast(`Error deleting product: ${e.message}`);
+      showToast(`Delete failed: ${e.message}`);
     } finally {
       setProductToDelete(null);
     }
   };
 
-  // Quick Photo Upload for a product in the list
-  const handleQuickPhotoSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !quickUploadProductId) return;
-
-    showToast('Uploading photo...');
+  // Delete Video Only (keeps product intact)
+  const handleConfirmDeleteVideo = async () => {
+    if (!videoToDelete) return;
     try {
-      const media = await uploadMediaFile(file, quickUploadProductId, 'image');
+      await deleteProductVideoOnly(videoToDelete.productId, videoToDelete.mediaId);
       setProducts((prev) =>
-        prev.map((p) => (p.id === quickUploadProductId ? { ...p, image_url: media.storage_path } : p))
+        prev.map((p) => (p.id === videoToDelete.productId ? { ...p, video_url: '' } : p))
       );
-      showToast('Product photo updated successfully!');
-      loadData();
-    } catch (err: any) {
-      showToast('Photo upload failed. Please try again.');
+      showToast(`Video removed from "${videoToDelete.title}". Product remains intact.`);
+      loadData(true);
+    } catch (e: any) {
+      showToast(`Error deleting video: ${e.message}`);
     } finally {
-      setQuickUploadProductId(null);
+      setVideoToDelete(null);
     }
   };
 
-  // Quick Video Upload for a product in the list
-  const handleQuickVideoSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !quickUploadProductId) return;
-
-    showToast('Uploading video...');
+  // Delete Photo Only
+  const handleConfirmDeletePhoto = async () => {
+    if (!photoToDelete) return;
     try {
-      const media = await uploadMediaFile(file, quickUploadProductId, 'video');
-      setProducts((prev) =>
-        prev.map((p) => (p.id === quickUploadProductId ? { ...p, video_url: media.storage_path } : p))
-      );
-      showToast('Product video uploaded successfully!');
-      loadData();
-    } catch (err: any) {
-      showToast('Video upload failed. Please try again.');
+      await deleteMediaItem(photoToDelete.id);
+      setMediaList((prev) => prev.filter((m) => m.id !== photoToDelete.id));
+      showToast(`Photo "${photoToDelete.file_name || 'Item'}" deleted.`);
+      loadData(true);
+    } catch (e: any) {
+      showToast(`Error deleting photo: ${e.message}`);
     } finally {
-      setQuickUploadProductId(null);
+      setPhotoToDelete(null);
     }
   };
 
-  // Dedicated Photo Center Upload Action
-  const handleDedicatedPhotoUpload = async () => {
-    if (!photoUploadFiles.length) {
-      showToast('Please select at least one photo first.');
-      return;
-    }
-
-    setPhotoUploading(true);
+  // Set Cover Photo
+  const handleSetCoverPhoto = async (m: MediaItem) => {
     try {
-      const targetId = photoTargetProduct || products[0]?.id || 'GENERAL';
-      for (const file of photoUploadFiles) {
-        await uploadMediaFile(file, targetId, 'image');
+      const target = products.find((p) => p.id === m.product_id);
+      if (target) {
+        target.image_url = m.storage_path;
+        await saveProduct(target);
+        setProducts((prev) => prev.map((p) => (p.id === target.id ? { ...target } : p)));
+        showToast('Set as main cover photo!');
       }
-      showToast(`${photoUploadFiles.length} photo(s) uploaded successfully!`);
-      setPhotoUploadFiles([]);
-      setPhotoUploadPreviews([]);
-      loadData();
     } catch (e: any) {
-      showToast(`Upload failed: ${e.message}`);
-    } finally {
-      setPhotoUploading(false);
-    }
-  };
-
-  // Dedicated Video Center Upload Action
-  const handleDedicatedVideoUpload = async () => {
-    if (!videoUploadFile) {
-      showToast('Please select a video file first.');
-      return;
-    }
-    if (!videoTargetProduct) {
-      showToast('Please select which product this video showcases.');
-      return;
-    }
-
-    setVideoUploading(true);
-    try {
-      await uploadMediaFile(videoUploadFile, videoTargetProduct, 'video');
-      showToast('Video uploaded and attached to product successfully!');
-      setVideoUploadFile(null);
-      setVideoUploadPreview('');
-      loadData();
-    } catch (e: any) {
-      showToast(`Video upload failed: ${e.message}`);
-    } finally {
-      setVideoUploading(false);
+      showToast('Could not set cover photo.');
     }
   };
 
@@ -431,6 +597,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     e.preventDefault();
     const cleanName = categoryInputName.trim();
     if (!cleanName) return;
+
+    if (categories.some((c) => c.name.toLowerCase() === cleanName.toLowerCase())) {
+      showToast(`Category "${cleanName}" already exists.`);
+      return;
+    }
 
     try {
       const newCat: CategoryItem = {
@@ -442,6 +613,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       setCategories((prev) => [...prev, newCat]);
       setCategoryInputName('');
       showToast(`Category "${cleanName}" added successfully.`);
+      loadData(true);
     } catch (e: any) {
       showToast(`Error adding category: ${e.message}`);
     }
@@ -461,6 +633,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       setCategories((prev) => prev.map((c) => (c.id === cat.id ? updated : c)));
       showToast(`Category renamed to "${cleanName}".`);
       setEditingCategoryId(null);
+      loadData(true);
     } catch (e: any) {
       showToast(`Error renaming category: ${e.message}`);
     }
@@ -478,26 +651,37 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       await deleteCategory(cat.id);
       setCategories((prev) => prev.filter((c) => c.id !== cat.id));
       showToast(`Category "${cat.name}" removed.`);
+      loadData(true);
     } catch (e: any) {
       showToast(`Error deleting category: ${e.message}`);
     }
   };
 
-  // Delete Media
-  const handleConfirmDeleteMedia = async () => {
-    if (!mediaToDelete) return;
+  // Dedicated Photo Center Upload Action
+  const handleDedicatedPhotoUpload = async () => {
+    if (!photoUploadFiles.length) {
+      showToast('Please select at least one photo first.');
+      return;
+    }
+
+    setPhotoUploading(true);
     try {
-      await deleteMediaItem(mediaToDelete.id);
-      setMediaList((prev) => prev.filter((m) => m.id !== mediaToDelete.id));
-      showToast('Media removed.');
+      const targetId = photoTargetProduct || products[0]?.id || 'GENERAL';
+      for (const file of photoUploadFiles) {
+        await uploadMediaFile(file, targetId, 'image');
+      }
+      showToast(`${photoUploadFiles.length} photo(s) uploaded successfully!`);
+      setPhotoUploadFiles([]);
+      setPhotoUploadPreviews([]);
+      loadData(true);
     } catch (e: any) {
-      showToast(`Error deleting media: ${e.message}`);
+      showToast(`Upload failed: ${e.message}`);
     } finally {
-      setMediaToDelete(null);
+      setPhotoUploading(false);
     }
   };
 
-  // Update Password
+  // Update Admin Password
   const handlePasswordSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!passCurrent || !passNew || !passConfirm) {
@@ -542,23 +726,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         flexDirection: 'column',
       }}
     >
-      {/* Hidden file pickers for quick uploads from product list */}
-      <input
-        type="file"
-        ref={quickPhotoPickerRef}
-        accept="image/jpeg,image/png,image/webp"
-        style={{ display: 'none' }}
-        onChange={handleQuickPhotoSelect}
-      />
-      <input
-        type="file"
-        ref={quickVideoPickerRef}
-        accept="video/mp4"
-        style={{ display: 'none' }}
-        onChange={handleQuickVideoSelect}
-      />
-
-      {/* TOP BAR */}
+      {/* TOP HEADER & NAVIGATION */}
       <header
         style={{
           background: '#ffffff',
@@ -571,9 +739,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       >
         <div
           style={{
-            maxWidth: '1280px',
+            maxWidth: '1360px',
             margin: '0 auto',
-            padding: '12px 16px',
+            padding: '12px 18px',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
@@ -632,14 +800,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 whiteSpace: 'nowrap',
               }}
             >
-              🏠 Home
+              📊 Dashboard
             </button>
             <button
               type="button"
-              onClick={handleOpenAddProduct}
+              onClick={handleOpenAddPhotoProduct}
               style={{
-                background: activeSection === 'add-product' ? '#c9a24d' : '#f0e8d5',
-                color: activeSection === 'add-product' ? '#ffffff' : '#785617',
+                background: activeSection === 'add-photo-product' ? '#c9a24d' : '#fef3c7',
+                color: activeSection === 'add-photo-product' ? '#ffffff' : '#92400e',
                 border: 'none',
                 borderRadius: '6px',
                 padding: '7px 12px',
@@ -649,7 +817,24 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 whiteSpace: 'nowrap',
               }}
             >
-              ＋ Add Product
+              🖼️ Add Photo Product
+            </button>
+            <button
+              type="button"
+              onClick={handleOpenAddVideoProduct}
+              style={{
+                background: activeSection === 'add-video-product' ? '#c9a24d' : '#f3e8ff',
+                color: activeSection === 'add-video-product' ? '#ffffff' : '#6b21a8',
+                border: 'none',
+                borderRadius: '6px',
+                padding: '7px 12px',
+                fontSize: '13px',
+                fontWeight: 700,
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              🎬 Add Video Product
             </button>
             <button
               type="button"
@@ -666,7 +851,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 whiteSpace: 'nowrap',
               }}
             >
-              📦 Products
+              📦 Manage Products
             </button>
             <button
               type="button"
@@ -719,9 +904,26 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             >
               🗂️ Categories
             </button>
+            <button
+              type="button"
+              onClick={() => setActiveSection('settings')}
+              style={{
+                background: activeSection === 'settings' ? '#182235' : 'transparent',
+                color: activeSection === 'settings' ? '#ffffff' : '#334155',
+                border: 'none',
+                borderRadius: '6px',
+                padding: '7px 12px',
+                fontSize: '13px',
+                fontWeight: 600,
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              ⚙️ Settings
+            </button>
           </nav>
 
-          {/* Actions */}
+          {/* Action Links */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <button
               type="button"
@@ -743,7 +945,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               }}
             >
               <span>👁️</span>
-              <span className="hidden-mobile">View Website</span>
+              <span>View Website</span>
             </button>
             <button
               type="button"
@@ -766,10 +968,47 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </div>
       </header>
 
-      {/* MAIN CONTENT CONTAINER */}
-      <main style={{ maxWidth: '1280px', width: '100%', margin: '0 auto', padding: '24px 16px', flex: 1 }}>
+      {/* MAIN CONTAINER */}
+      <main style={{ maxWidth: '1360px', width: '100%', margin: '0 auto', padding: '24px 18px', flex: 1 }}>
+        {/* Error notification banner if database request failed */}
+        {dataError && (
+          <div
+            style={{
+              background: '#fef2f2',
+              border: '1px solid #fecaca',
+              borderRadius: '10px',
+              padding: '14px 18px',
+              marginBottom: '20px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '12px',
+            }}
+          >
+            <div style={{ color: '#991b1b', fontSize: '14px', fontWeight: 600 }}>
+              ⚠️ Unable to load latest data from database: {dataError}
+            </div>
+            <button
+              type="button"
+              onClick={() => loadData(false)}
+              style={{
+                background: '#991b1b',
+                color: '#ffffff',
+                border: 'none',
+                borderRadius: '6px',
+                padding: '7px 14px',
+                fontSize: '13px',
+                fontWeight: 700,
+                cursor: 'pointer',
+              }}
+            >
+              🔄 Retry
+            </button>
+          </div>
+        )}
+
         {/* ============================================================
-            1. DASHBOARD HOME (OVERVIEW)
+            1. OVERVIEW DASHBOARD HOME
             ============================================================ */}
         {activeSection === 'overview' && (
           <div>
@@ -791,41 +1030,97 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             >
               <div>
                 <h1 style={{ fontSize: '26px', margin: '0 0 6px', fontWeight: 800 }}>
-                  Welcome to Anmol Kala Manager
+                  Welcome to Anmol Kala Admin
                 </h1>
-                <p style={{ margin: 0, fontSize: '14px', color: '#cbd5e1', maxWidth: '600px', lineHeight: 1.5 }}>
-                  Manage your craft catalogue easily. Tap any card below to add new items, update photos, or organize categories.
+                <p style={{ margin: 0, fontSize: '14px', color: '#cbd5e1', maxWidth: '640px', lineHeight: 1.5 }}>
+                  Manage your craft catalogue, upload videos with mandatory cover photos, and view real database totals.
                 </p>
               </div>
 
-              <button
-                type="button"
-                onClick={handleOpenAddProduct}
-                style={{
-                  background: 'linear-gradient(135deg, #d8b45a 0%, #c9a24d 100%)',
-                  color: '#182235',
-                  border: 'none',
-                  borderRadius: '8px',
-                  padding: '12px 20px',
-                  fontSize: '14px',
-                  fontWeight: 800,
-                  cursor: 'pointer',
-                  boxShadow: '0 4px 12px rgba(201, 162, 77, 0.35)',
-                }}
-              >
-                ＋ Add New Product
-              </button>
+              <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  onClick={handleOpenAddPhotoProduct}
+                  style={{
+                    background: 'linear-gradient(135deg, #d8b45a 0%, #c9a24d 100%)',
+                    color: '#182235',
+                    border: 'none',
+                    borderRadius: '8px',
+                    padding: '11px 18px',
+                    fontSize: '13px',
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                    boxShadow: '0 4px 12px rgba(201, 162, 77, 0.35)',
+                  }}
+                >
+                  ＋ Add Photo Product
+                </button>
+                <button
+                  type="button"
+                  onClick={handleOpenAddVideoProduct}
+                  style={{
+                    background: '#ffffff',
+                    color: '#182235',
+                    border: 'none',
+                    borderRadius: '8px',
+                    padding: '11px 18px',
+                    fontSize: '13px',
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                  }}
+                >
+                  🎬 Add Video Product
+                </button>
+              </div>
             </div>
 
-            {/* Small Useful Summaries */}
+            {/* Database Error Alert with Retry */}
+            {dataError && products.length === 0 && (
+              <div
+                style={{
+                  background: '#fef2f2',
+                  border: '1px solid #fca5a5',
+                  borderRadius: '10px',
+                  padding: '14px 18px',
+                  marginBottom: '20px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '12px',
+                }}
+              >
+                <div style={{ color: '#991b1b', fontSize: '13px', fontWeight: 600 }}>
+                  ⚠️ Unable to load database metrics: {dataError}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => loadData(false)}
+                  style={{
+                    background: '#991b1b',
+                    color: '#ffffff',
+                    border: 'none',
+                    borderRadius: '6px',
+                    padding: '6px 14px',
+                    fontSize: '12px',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Retry
+                </button>
+              </div>
+            )}
+
+            {/* REAL DATABASE TOTALS SUMMARY CARDS (NO FALSE ZERO) */}
             <div
               style={{
                 display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
                 gap: '14px',
                 marginBottom: '28px',
               }}
             >
+              {/* Card 1: Total Products */}
               <div
                 style={{
                   background: '#ffffff',
@@ -838,14 +1133,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <div style={{ fontSize: '12px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>
                   Total Products
                 </div>
-                <div style={{ fontSize: '32px', fontWeight: 900, color: '#0f172a', marginTop: '4px' }}>
-                  {totalProducts}
-                </div>
+                {totalProducts === null ? (
+                  <div style={{ height: '38px', width: '80px', background: '#f1f5f9', borderRadius: '6px', margin: '6px 0', animation: 'pulse 1.5s infinite' }} />
+                ) : (
+                  <div style={{ fontSize: '32px', fontWeight: 900, color: '#0f172a', marginTop: '4px' }}>
+                    {totalProducts}
+                  </div>
+                )}
                 <div style={{ fontSize: '11px', color: '#16a34a', marginTop: '2px', fontWeight: 600 }}>
-                  Active in storefront
+                  In database catalogue
                 </div>
               </div>
 
+              {/* Card 2: Published Products */}
               <div
                 style={{
                   background: '#ffffff',
@@ -856,16 +1156,46 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 }}
               >
                 <div style={{ fontSize: '12px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>
-                  Total Photos
+                  Published Products
                 </div>
-                <div style={{ fontSize: '32px', fontWeight: 900, color: '#0f172a', marginTop: '4px' }}>
-                  {totalPhotos || products.length}
+                {publishedProducts === null ? (
+                  <div style={{ height: '38px', width: '80px', background: '#f1f5f9', borderRadius: '6px', margin: '6px 0', animation: 'pulse 1.5s infinite' }} />
+                ) : (
+                  <div style={{ fontSize: '32px', fontWeight: 900, color: '#0f172a', marginTop: '4px' }}>
+                    {publishedProducts}
+                  </div>
+                )}
+                <div style={{ fontSize: '11px', color: '#15803d', marginTop: '2px', fontWeight: 600 }}>
+                  Visible to public visitors
                 </div>
+              </div>
+
+              {/* Card 3: Photos */}
+              <div
+                style={{
+                  background: '#ffffff',
+                  padding: '18px 20px',
+                  borderRadius: '12px',
+                  border: '1px solid #e7e2d8',
+                  boxShadow: '0 2px 6px rgba(0,0,0,0.02)',
+                }}
+              >
+                <div style={{ fontSize: '12px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>
+                  Photos
+                </div>
+                {totalPhotos === null ? (
+                  <div style={{ height: '38px', width: '80px', background: '#f1f5f9', borderRadius: '6px', margin: '6px 0', animation: 'pulse 1.5s infinite' }} />
+                ) : (
+                  <div style={{ fontSize: '32px', fontWeight: 900, color: '#0f172a', marginTop: '4px' }}>
+                    {totalPhotos}
+                  </div>
+                )}
                 <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>
-                  Product showcase images
+                  Handmade product images
                 </div>
               </div>
 
+              {/* Card 4: Videos */}
               <div
                 style={{
                   background: '#ffffff',
@@ -876,16 +1206,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 }}
               >
                 <div style={{ fontSize: '12px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>
-                  Total Videos
+                  Videos
                 </div>
-                <div style={{ fontSize: '32px', fontWeight: 900, color: '#0f172a', marginTop: '4px' }}>
-                  {totalVideos}
-                </div>
+                {totalVideos === null ? (
+                  <div style={{ height: '38px', width: '80px', background: '#f1f5f9', borderRadius: '6px', margin: '6px 0', animation: 'pulse 1.5s infinite' }} />
+                ) : (
+                  <div style={{ fontSize: '32px', fontWeight: 900, color: '#0f172a', marginTop: '4px' }}>
+                    {totalVideos}
+                  </div>
+                )}
                 <div style={{ fontSize: '11px', color: '#2563eb', marginTop: '2px', fontWeight: 600 }}>
                   Craft demonstration videos
                 </div>
               </div>
 
+              {/* Card 5: Categories */}
               <div
                 style={{
                   background: '#ffffff',
@@ -896,20 +1231,24 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 }}
               >
                 <div style={{ fontSize: '12px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>
-                  Collections
+                  Categories
                 </div>
-                <div style={{ fontSize: '32px', fontWeight: 900, color: '#0f172a', marginTop: '4px' }}>
-                  {categories.length}
-                </div>
+                {totalCategories === null ? (
+                  <div style={{ height: '38px', width: '80px', background: '#f1f5f9', borderRadius: '6px', margin: '6px 0', animation: 'pulse 1.5s infinite' }} />
+                ) : (
+                  <div style={{ fontSize: '32px', fontWeight: 900, color: '#0f172a', marginTop: '4px' }}>
+                    {totalCategories}
+                  </div>
+                )}
                 <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>
-                  Thalis, Clocks, Frames, Trays
+                  Thalis, Clocks, Frames, Trays...
                 </div>
               </div>
             </div>
 
-            {/* Clear Action Cards */}
+            {/* EXACT FOUR PROMINENT PRIMARY ACTION CARDS */}
             <h2 style={{ fontSize: '18px', fontWeight: 800, margin: '0 0 16px', color: '#0f172a' }}>
-              What would you like to do?
+              Primary Actions
             </h2>
 
             <div
@@ -917,16 +1256,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 display: 'grid',
                 gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
                 gap: '16px',
+                marginBottom: '32px',
               }}
             >
-              {/* 1. Add Product Card */}
+              {/* Action 1: Add Photo Product */}
               <div
-                onClick={handleOpenAddProduct}
+                onClick={handleOpenAddPhotoProduct}
                 style={{
                   background: '#ffffff',
                   borderRadius: '12px',
                   border: '1px solid #e2dac9',
-                  padding: '22px',
+                  padding: '24px',
                   cursor: 'pointer',
                   transition: 'all 0.18s ease',
                   boxShadow: '0 2px 8px rgba(0,0,0,0.03)',
@@ -945,257 +1285,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               >
                 <div
                   style={{
-                    width: '48px',
-                    height: '48px',
-                    borderRadius: '10px',
+                    width: '52px',
+                    height: '52px',
+                    borderRadius: '12px',
                     background: '#fef3c7',
                     color: '#b45309',
-                    fontSize: '24px',
-                    display: 'grid',
-                    placeItems: 'center',
-                    flexShrink: 0,
-                  }}
-                >
-                  ➕
-                </div>
-                <div>
-                  <h3 style={{ fontSize: '16px', fontWeight: 800, margin: '0 0 4px', color: '#0f172a' }}>
-                    Add New Product
-                  </h3>
-                  <p style={{ fontSize: '13px', color: '#64748b', margin: 0, lineHeight: 1.4 }}>
-                    Add a new item to your website with photos, video and price.
-                  </p>
-                </div>
-              </div>
-
-              {/* 2. Manage Products Card */}
-              <div
-                onClick={() => setActiveSection('products')}
-                style={{
-                  background: '#ffffff',
-                  borderRadius: '12px',
-                  border: '1px solid #e2dac9',
-                  padding: '22px',
-                  cursor: 'pointer',
-                  transition: 'all 0.18s ease',
-                  boxShadow: '0 2px 8px rgba(0,0,0,0.03)',
-                  display: 'flex',
-                  alignItems: 'flex-start',
-                  gap: '16px',
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.borderColor = '#c9a24d';
-                  e.currentTarget.style.transform = 'translateY(-2px)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.borderColor = '#e2dac9';
-                  e.currentTarget.style.transform = 'translateY(0)';
-                }}
-              >
-                <div
-                  style={{
-                    width: '48px',
-                    height: '48px',
-                    borderRadius: '10px',
-                    background: '#e0f2fe',
-                    color: '#0369a1',
-                    fontSize: '24px',
-                    display: 'grid',
-                    placeItems: 'center',
-                    flexShrink: 0,
-                  }}
-                >
-                  📦
-                </div>
-                <div>
-                  <h3 style={{ fontSize: '16px', fontWeight: 800, margin: '0 0 4px', color: '#0f172a' }}>
-                    Manage Products
-                  </h3>
-                  <p style={{ fontSize: '13px', color: '#64748b', margin: 0, lineHeight: 1.4 }}>
-                    Edit names, descriptions, photos, and availability.
-                  </p>
-                </div>
-              </div>
-
-              {/* 3. Upload Photos Card */}
-              <div
-                onClick={() => setActiveSection('images')}
-                style={{
-                  background: '#ffffff',
-                  borderRadius: '12px',
-                  border: '1px solid #e2dac9',
-                  padding: '22px',
-                  cursor: 'pointer',
-                  transition: 'all 0.18s ease',
-                  boxShadow: '0 2px 8px rgba(0,0,0,0.03)',
-                  display: 'flex',
-                  alignItems: 'flex-start',
-                  gap: '16px',
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.borderColor = '#c9a24d';
-                  e.currentTarget.style.transform = 'translateY(-2px)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.borderColor = '#e2dac9';
-                  e.currentTarget.style.transform = 'translateY(0)';
-                }}
-              >
-                <div
-                  style={{
-                    width: '48px',
-                    height: '48px',
-                    borderRadius: '10px',
-                    background: '#dcfce7',
-                    color: '#15803d',
-                    fontSize: '24px',
-                    display: 'grid',
-                    placeItems: 'center',
-                    flexShrink: 0,
-                  }}
-                >
-                  📷
-                </div>
-                <div>
-                  <h3 style={{ fontSize: '16px', fontWeight: 800, margin: '0 0 4px', color: '#0f172a' }}>
-                    Upload Photos
-                  </h3>
-                  <p style={{ fontSize: '13px', color: '#64748b', margin: 0, lineHeight: 1.4 }}>
-                    Choose pictures directly from your phone or computer.
-                  </p>
-                </div>
-              </div>
-
-              {/* 4. Upload Videos Card */}
-              <div
-                onClick={() => setActiveSection('videos')}
-                style={{
-                  background: '#ffffff',
-                  borderRadius: '12px',
-                  border: '1px solid #e2dac9',
-                  padding: '22px',
-                  cursor: 'pointer',
-                  transition: 'all 0.18s ease',
-                  boxShadow: '0 2px 8px rgba(0,0,0,0.03)',
-                  display: 'flex',
-                  alignItems: 'flex-start',
-                  gap: '16px',
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.borderColor = '#c9a24d';
-                  e.currentTarget.style.transform = 'translateY(-2px)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.borderColor = '#e2dac9';
-                  e.currentTarget.style.transform = 'translateY(0)';
-                }}
-              >
-                <div
-                  style={{
-                    width: '48px',
-                    height: '48px',
-                    borderRadius: '10px',
-                    background: '#fae8ff',
-                    color: '#a21caf',
-                    fontSize: '24px',
-                    display: 'grid',
-                    placeItems: 'center',
-                    flexShrink: 0,
-                  }}
-                >
-                  🎥
-                </div>
-                <div>
-                  <h3 style={{ fontSize: '16px', fontWeight: 800, margin: '0 0 4px', color: '#0f172a' }}>
-                    Upload Videos
-                  </h3>
-                  <p style={{ fontSize: '13px', color: '#64748b', margin: 0, lineHeight: 1.4 }}>
-                    Add a product video to your website.
-                  </p>
-                </div>
-              </div>
-
-              {/* 5. Categories Card */}
-              <div
-                onClick={() => setActiveSection('categories')}
-                style={{
-                  background: '#ffffff',
-                  borderRadius: '12px',
-                  border: '1px solid #e2dac9',
-                  padding: '22px',
-                  cursor: 'pointer',
-                  transition: 'all 0.18s ease',
-                  boxShadow: '0 2px 8px rgba(0,0,0,0.03)',
-                  display: 'flex',
-                  alignItems: 'flex-start',
-                  gap: '16px',
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.borderColor = '#c9a24d';
-                  e.currentTarget.style.transform = 'translateY(-2px)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.borderColor = '#e2dac9';
-                  e.currentTarget.style.transform = 'translateY(0)';
-                }}
-              >
-                <div
-                  style={{
-                    width: '48px',
-                    height: '48px',
-                    borderRadius: '10px',
-                    background: '#ffedd5',
-                    color: '#c2410c',
-                    fontSize: '24px',
-                    display: 'grid',
-                    placeItems: 'center',
-                    flexShrink: 0,
-                  }}
-                >
-                  🗂️
-                </div>
-                <div>
-                  <h3 style={{ fontSize: '16px', fontWeight: 800, margin: '0 0 4px', color: '#0f172a' }}>
-                    Categories
-                  </h3>
-                  <p style={{ fontSize: '13px', color: '#64748b', margin: 0, lineHeight: 1.4 }}>
-                    Organize your craft collections (Thalis, Frames, Clocks, etc.).
-                  </p>
-                </div>
-              </div>
-
-              {/* 6. Media Library Card */}
-              <div
-                onClick={() => setActiveSection('media-gallery')}
-                style={{
-                  background: '#ffffff',
-                  borderRadius: '12px',
-                  border: '1px solid #e2dac9',
-                  padding: '22px',
-                  cursor: 'pointer',
-                  transition: 'all 0.18s ease',
-                  boxShadow: '0 2px 8px rgba(0,0,0,0.03)',
-                  display: 'flex',
-                  alignItems: 'flex-start',
-                  gap: '16px',
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.borderColor = '#c9a24d';
-                  e.currentTarget.style.transform = 'translateY(-2px)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.borderColor = '#e2dac9';
-                  e.currentTarget.style.transform = 'translateY(0)';
-                }}
-              >
-                <div
-                  style={{
-                    width: '48px',
-                    height: '48px',
-                    borderRadius: '10px',
-                    background: '#f1f5f9',
-                    color: '#475569',
-                    fontSize: '24px',
+                    fontSize: '26px',
                     display: 'grid',
                     placeItems: 'center',
                     flexShrink: 0,
@@ -1204,23 +1299,26 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   🖼️
                 </div>
                 <div>
-                  <h3 style={{ fontSize: '16px', fontWeight: 800, margin: '0 0 4px', color: '#0f172a' }}>
-                    Media Library
+                  <h3 style={{ fontSize: '17px', fontWeight: 800, margin: '0 0 4px', color: '#0f172a' }}>
+                    Add Photo Product
                   </h3>
                   <p style={{ fontSize: '13px', color: '#64748b', margin: 0, lineHeight: 1.4 }}>
-                    Browse and manage all uploaded photos and videos.
+                    Create a new craft product with high-resolution photos and details.
                   </p>
+                  <span style={{ display: 'inline-block', marginTop: '10px', fontSize: '13px', fontWeight: 700, color: '#b45309' }}>
+                    Add Photo Product →
+                  </span>
                 </div>
               </div>
 
-              {/* 7. Settings Card */}
+              {/* Action 2: Add Video Product */}
               <div
-                onClick={() => setActiveSection('settings')}
+                onClick={handleOpenAddVideoProduct}
                 style={{
                   background: '#ffffff',
                   borderRadius: '12px',
                   border: '1px solid #e2dac9',
-                  padding: '22px',
+                  padding: '24px',
                   cursor: 'pointer',
                   transition: 'all 0.18s ease',
                   boxShadow: '0 2px 8px rgba(0,0,0,0.03)',
@@ -1239,36 +1337,188 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               >
                 <div
                   style={{
-                    width: '48px',
-                    height: '48px',
-                    borderRadius: '10px',
+                    width: '52px',
+                    height: '52px',
+                    borderRadius: '12px',
                     background: '#f3e8ff',
                     color: '#7e22ce',
-                    fontSize: '24px',
+                    fontSize: '26px',
                     display: 'grid',
                     placeItems: 'center',
                     flexShrink: 0,
                   }}
                 >
-                  ⚙️
+                  🎬
                 </div>
                 <div>
-                  <h3 style={{ fontSize: '16px', fontWeight: 800, margin: '0 0 4px', color: '#0f172a' }}>
-                    Settings
+                  <h3 style={{ fontSize: '17px', fontWeight: 800, margin: '0 0 4px', color: '#0f172a' }}>
+                    Add Video Product
                   </h3>
                   <p style={{ fontSize: '13px', color: '#64748b', margin: 0, lineHeight: 1.4 }}>
-                    Change admin password and view database connection.
+                    Create a video showcase product (requires at least 1 product photo).
                   </p>
+                  <span style={{ display: 'inline-block', marginTop: '10px', fontSize: '13px', fontWeight: 700, color: '#7e22ce' }}>
+                    Add Video Product →
+                  </span>
                 </div>
               </div>
+
+              {/* Action 3: Manage Products */}
+              <div
+                onClick={() => setActiveSection('products')}
+                style={{
+                  background: '#ffffff',
+                  borderRadius: '12px',
+                  border: '1px solid #e2dac9',
+                  padding: '24px',
+                  cursor: 'pointer',
+                  transition: 'all 0.18s ease',
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.03)',
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: '16px',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.borderColor = '#c9a24d';
+                  e.currentTarget.style.transform = 'translateY(-2px)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.borderColor = '#e2dac9';
+                  e.currentTarget.style.transform = 'translateY(0)';
+                }}
+              >
+                <div
+                  style={{
+                    width: '52px',
+                    height: '52px',
+                    borderRadius: '12px',
+                    background: '#e0f2fe',
+                    color: '#0369a1',
+                    fontSize: '26px',
+                    display: 'grid',
+                    placeItems: 'center',
+                    flexShrink: 0,
+                  }}
+                >
+                  📦
+                </div>
+                <div>
+                  <h3 style={{ fontSize: '17px', fontWeight: 800, margin: '0 0 4px', color: '#0f172a' }}>
+                    Manage Products
+                  </h3>
+                  <p style={{ fontSize: '13px', color: '#64748b', margin: 0, lineHeight: 1.4 }}>
+                    Search, edit, preview, publish, or remove catalogue items.
+                  </p>
+                  <span style={{ display: 'inline-block', marginTop: '10px', fontSize: '13px', fontWeight: 700, color: '#0369a1' }}>
+                    Manage Products →
+                  </span>
+                </div>
+              </div>
+
+              {/* Action 4: Photo & Video Library */}
+              <div
+                onClick={() => setActiveSection('images')}
+                style={{
+                  background: '#ffffff',
+                  borderRadius: '12px',
+                  border: '1px solid #e2dac9',
+                  padding: '24px',
+                  cursor: 'pointer',
+                  transition: 'all 0.18s ease',
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.03)',
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: '16px',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.borderColor = '#c9a24d';
+                  e.currentTarget.style.transform = 'translateY(-2px)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.borderColor = '#e2dac9';
+                  e.currentTarget.style.transform = 'translateY(0)';
+                }}
+              >
+                <div
+                  style={{
+                    width: '52px',
+                    height: '52px',
+                    borderRadius: '12px',
+                    background: '#dcfce7',
+                    color: '#15803d',
+                    fontSize: '26px',
+                    display: 'grid',
+                    placeItems: 'center',
+                    flexShrink: 0,
+                  }}
+                >
+                  🎨
+                </div>
+                <div>
+                  <h3 style={{ fontSize: '17px', fontWeight: 800, margin: '0 0 4px', color: '#0f172a' }}>
+                    Photo &amp; Video Library
+                  </h3>
+                  <p style={{ fontSize: '13px', color: '#64748b', margin: 0, lineHeight: 1.4 }}>
+                    Browse, manage, and replace all uploaded media assets.
+                  </p>
+                  <span style={{ display: 'inline-block', marginTop: '10px', fontSize: '13px', fontWeight: 700, color: '#15803d' }}>
+                    Open Media Library →
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Database Status Information Card */}
+            <div
+              style={{
+                background: '#ffffff',
+                border: '1px solid #e7e2d8',
+                borderRadius: '12px',
+                padding: '20px 24px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: '14px',
+              }}
+            >
+              <div>
+                <div style={{ fontSize: '14px', fontWeight: 800, color: '#0f172a' }}>
+                  Database Status: {dbStatus?.provider || 'PostgreSQL'}
+                </div>
+                <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
+                  Status:{' '}
+                  <span style={{ color: '#16a34a', fontWeight: 700 }}>
+                    ● Connected &amp; Synced
+                  </span>{' '}
+                  · Database: {dbStatus?.database || 'postgres'}
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => loadData(false)}
+                style={{
+                  background: '#f1f5f9',
+                  border: '1px solid #cbd5e1',
+                  borderRadius: '6px',
+                  padding: '8px 14px',
+                  fontSize: '12px',
+                  fontWeight: 700,
+                  color: '#334155',
+                  cursor: 'pointer',
+                }}
+              >
+                🔄 Refresh Totals
+              </button>
             </div>
           </div>
         )}
 
         {/* ============================================================
-            2. ADD / EDIT PRODUCT — ONE EASY FORM
+            2. ADD PHOTO PRODUCT FORM
             ============================================================ */}
-        {activeSection === 'add-product' && (
+        {activeSection === 'add-photo-product' && (
           <div style={{ maxWidth: '820px', margin: '0 auto' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px' }}>
               <div>
@@ -1289,18 +1539,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   ← Back to Products
                 </button>
                 <h1 style={{ fontSize: '24px', fontWeight: 800, margin: 0, color: '#0f172a' }}>
-                  {editingItem ? 'Edit Product' : 'Add New Product'}
+                  {editingItem ? 'Edit Product' : 'Add Photo Product'}
                 </h1>
                 <p style={{ margin: '4px 0 0', color: '#64748b', fontSize: '13px' }}>
                   {editingItem
-                    ? `Updating "${editingItem.name}" (ID: ${editingItem.id})`
-                    : 'Fill in the details below. It will appear on your website as soon as you tap Save.'}
+                    ? `Updating "${editingItem.name}" (Permanent ID: ${editingItem.id})`
+                    : 'Create a new handcrafted photo product for your public catalogue.'}
                 </p>
               </div>
             </div>
 
             <form
-              onSubmit={handleSaveProductForm}
+              onSubmit={handleSavePhotoProduct}
               style={{
                 background: '#ffffff',
                 borderRadius: '14px',
@@ -1317,9 +1567,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <input
                   type="text"
                   required
-                  value={formName}
-                  onChange={(e) => setFormName(e.target.value)}
-                  placeholder="Enter product name (e.g. Peacock Resin Puja Thali)"
+                  value={photoFormName}
+                  onChange={(e) => setPhotoFormName(e.target.value)}
+                  placeholder="e.g. Royal Blue Resin Wall Clock"
                   style={{
                     width: '100%',
                     padding: '12px 14px',
@@ -1338,7 +1588,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <label style={{ fontWeight: 700, fontSize: '13px' }}>Category *</label>
                   <button
                     type="button"
-                    onClick={() => setFormNewCategoryInline(!formNewCategoryInline)}
+                    onClick={() => setPhotoFormNewCatInline(!photoFormNewCatInline)}
                     style={{
                       background: 'none',
                       border: 'none',
@@ -1349,14 +1599,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       padding: 0,
                     }}
                   >
-                    {formNewCategoryInline ? 'Choose Existing' : '＋ Add New Category'}
+                    {photoFormNewCatInline ? 'Choose Existing' : '＋ Create New Category'}
                   </button>
                 </div>
 
-                {!formNewCategoryInline ? (
+                {!photoFormNewCatInline ? (
                   <select
-                    value={formCategory}
-                    onChange={(e) => setFormCategory(e.target.value)}
+                    value={photoFormCategory}
+                    onChange={(e) => setPhotoFormCategory(e.target.value)}
                     style={{
                       width: '100%',
                       padding: '12px 14px',
@@ -1376,9 +1626,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 ) : (
                   <input
                     type="text"
-                    value={formNewCategoryName}
-                    onChange={(e) => setFormNewCategoryName(e.target.value)}
-                    placeholder="Type new category name (e.g. Diya Holders)"
+                    value={photoFormNewCatName}
+                    onChange={(e) => setPhotoFormNewCatName(e.target.value)}
+                    placeholder="Type new category name (e.g. Resin Coasters)"
                     style={{
                       width: '100%',
                       padding: '12px 14px',
@@ -1398,10 +1648,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   Product Description
                 </label>
                 <textarea
-                  value={formDescription}
-                  onChange={(e) => setFormDescription(e.target.value)}
-                  placeholder="Write a short description about the product (materials, size, finish)..."
-                  rows={4}
+                  rows={3}
+                  value={photoFormDesc}
+                  onChange={(e) => setPhotoFormDesc(e.target.value)}
+                  placeholder="Describe your craft piece, colors, resin finish and size..."
                   style={{
                     width: '100%',
                     padding: '12px 14px',
@@ -1414,275 +1664,226 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 />
               </div>
 
-              {/* Availability */}
-              <div style={{ marginBottom: '24px' }}>
-                <label style={{ display: 'block', fontWeight: 700, fontSize: '13px', marginBottom: '8px' }}>
-                  Availability
+              {/* Photo Upload from device (Native Picker) */}
+              <div style={{ marginBottom: '22px' }}>
+                <label style={{ display: 'block', fontWeight: 700, fontSize: '13px', marginBottom: '6px' }}>
+                  Product Photos (from your device)
                 </label>
-                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                  <button
-                    type="button"
-                    onClick={() => setFormAvailability('in_stock')}
-                    style={{
-                      background: formAvailability === 'in_stock' ? '#16a34a' : '#ffffff',
-                      color: formAvailability === 'in_stock' ? '#ffffff' : '#334155',
-                      border: formAvailability === 'in_stock' ? '1px solid #16a34a' : '1px solid #cbd5e1',
-                      borderRadius: '8px',
-                      padding: '10px 16px',
-                      fontSize: '13px',
-                      fontWeight: 700,
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '6px',
-                    }}
-                  >
-                    <span>🟢</span> Available (In Stock)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setFormAvailability('made_to_order')}
-                    style={{
-                      background: formAvailability === 'made_to_order' ? '#d97706' : '#ffffff',
-                      color: formAvailability === 'made_to_order' ? '#ffffff' : '#334155',
-                      border: formAvailability === 'made_to_order' ? '1px solid #d97706' : '1px solid #cbd5e1',
-                      borderRadius: '8px',
-                      padding: '10px 16px',
-                      fontSize: '13px',
-                      fontWeight: 700,
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '6px',
-                    }}
-                  >
-                    <span>🟡</span> Made to Order
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setFormAvailability('out_of_stock')}
-                    style={{
-                      background: formAvailability === 'out_of_stock' ? '#dc2626' : '#ffffff',
-                      color: formAvailability === 'out_of_stock' ? '#ffffff' : '#334155',
-                      border: formAvailability === 'out_of_stock' ? '1px solid #dc2626' : '1px solid #cbd5e1',
-                      borderRadius: '8px',
-                      padding: '10px 16px',
-                      fontSize: '13px',
-                      fontWeight: 700,
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '6px',
-                    }}
-                  >
-                    <span>🔴</span> Out of Stock
-                  </button>
-                </div>
-              </div>
-
-              {/* Product Photos (Device Native File Selection) */}
-              <div style={{ marginBottom: '24px', padding: '16px', borderRadius: '10px', background: '#f8fafc', border: '1px dashed #cbd5e1' }}>
-                <label style={{ display: 'block', fontWeight: 800, fontSize: '14px', marginBottom: '4px' }}>
-                  📷 Product Photos
-                </label>
-                <p style={{ fontSize: '12px', color: '#64748b', margin: '0 0 12px' }}>
-                  Tap below to choose photos directly from your phone gallery or computer.
-                </p>
 
                 <input
                   type="file"
                   multiple
+                  ref={photoFormPickerRef}
                   accept="image/jpeg,image/png,image/webp"
-                  onChange={handleSelectFormPhotos}
-                  id="form-photo-input"
                   style={{ display: 'none' }}
+                  onChange={handleSelectPhotoFormFiles}
                 />
 
-                <label
-                  htmlFor="form-photo-input"
+                <div
+                  onClick={() => photoFormPickerRef.current?.click()}
                   style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '8px',
-                    background: '#ffffff',
-                    border: '1px solid #cbd5e1',
-                    borderRadius: '8px',
-                    padding: '11px 18px',
-                    fontSize: '13px',
-                    fontWeight: 700,
-                    color: '#182235',
+                    border: '2px dashed #cbd5e1',
+                    borderRadius: '10px',
+                    padding: '24px 16px',
+                    textAlign: 'center',
+                    background: '#f8fafc',
                     cursor: 'pointer',
-                    boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+                    transition: 'all 0.15s ease',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.borderColor = '#c9a24d';
+                    e.currentTarget.style.background = '#fffdf9';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.borderColor = '#cbd5e1';
+                    e.currentTarget.style.background = '#f8fafc';
                   }}
                 >
-                  <span>📷</span> Select Photos from Gallery
-                </label>
+                  <div style={{ fontSize: '32px', marginBottom: '6px' }}>📷</div>
+                  <div style={{ fontSize: '14px', fontWeight: 700, color: '#1e293b' }}>
+                    Tap to select photos from phone gallery or computer
+                  </div>
+                  <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
+                    Supports JPG, PNG, and WEBP
+                  </div>
+                </div>
 
-                {/* Previews */}
-                {(formPhotoPreviews.length > 0 || formExistingPhoto) && (
-                  <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginTop: '14px' }}>
-                    {formExistingPhoto && formPhotoPreviews.length === 0 && (
-                      <div style={{ position: 'relative' }}>
-                        <img
-                          src={formExistingPhoto}
-                          alt="Current photo"
-                          style={{ width: '90px', height: '90px', objectFit: 'cover', borderRadius: '8px', border: '1px solid #cbd5e1' }}
-                          onError={handleImageError}
-                        />
-                        <span style={{ position: 'absolute', bottom: '4px', left: '4px', background: '#0008', color: '#fff', fontSize: '9px', padding: '2px 4px', borderRadius: '3px' }}>
-                          Current
-                        </span>
-                      </div>
-                    )}
-                    {formPhotoPreviews.map((src, i) => (
-                      <div key={i} style={{ position: 'relative' }}>
-                        <img
-                          src={src}
-                          alt="New preview"
-                          style={{ width: '90px', height: '90px', objectFit: 'cover', borderRadius: '8px', border: '2px solid #22c55e' }}
-                        />
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setFormPhotoPreviews((prev) => prev.filter((_, idx) => idx !== i));
-                            setFormPhotoFiles((prev) => prev.filter((_, idx) => idx !== i));
-                          }}
+                {/* Previews & Cover Selection */}
+                {photoFormPreviews.length > 0 && (
+                  <div style={{ marginTop: '16px' }}>
+                    <div style={{ fontSize: '12px', fontWeight: 700, color: '#475569', marginBottom: '8px' }}>
+                      Selected Photos ({photoFormPreviews.length}) — Click one to set as Cover Photo:
+                    </div>
+                    <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                      {photoFormPreviews.map((src, idx) => (
+                        <div
+                          key={idx}
+                          onClick={() => setPhotoFormCoverIndex(idx)}
                           style={{
-                            position: 'absolute',
-                            top: '-6px',
-                            right: '-6px',
-                            background: '#ef4444',
-                            color: '#fff',
-                            border: 'none',
-                            borderRadius: '50%',
-                            width: '22px',
-                            height: '22px',
-                            fontSize: '12px',
-                            fontWeight: 800,
+                            position: 'relative',
                             cursor: 'pointer',
-                            display: 'grid',
-                            placeItems: 'center',
+                            borderRadius: '8px',
+                            overflow: 'hidden',
+                            border: photoFormCoverIndex === idx ? '3px solid #c9a24d' : '1px solid #cbd5e1',
                           }}
                         >
-                          ✕
-                        </button>
-                      </div>
-                    ))}
+                          <img
+                            src={src}
+                            alt="preview"
+                            style={{ width: '90px', height: '90px', objectFit: 'cover', display: 'block' }}
+                          />
+                          {photoFormCoverIndex === idx && (
+                            <span
+                              style={{
+                                position: 'absolute',
+                                bottom: '0',
+                                left: '0',
+                                right: '0',
+                                background: '#c9a24d',
+                                color: '#fff',
+                                fontSize: '10px',
+                                fontWeight: 800,
+                                textAlign: 'center',
+                                padding: '2px 0',
+                              }}
+                            >
+                              ★ COVER
+                            </span>
+                          )}
+                          <button
+                            type="button"
+                            onClick={(ev) => {
+                              ev.stopPropagation();
+                              setPhotoFormPreviews((p) => p.filter((_, i) => i !== idx));
+                              setPhotoFormFiles((p) => p.filter((_, i) => i !== idx));
+                              if (photoFormCoverIndex >= idx) {
+                                setPhotoFormCoverIndex((cur) => Math.max(0, cur - 1));
+                              }
+                            }}
+                            style={{
+                              position: 'absolute',
+                              top: '4px',
+                              right: '4px',
+                              background: '#ef4444',
+                              color: '#fff',
+                              border: 'none',
+                              borderRadius: '50%',
+                              width: '20px',
+                              height: '20px',
+                              fontSize: '11px',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>
 
-              {/* Product Video (Device Native File Selection) */}
-              <div style={{ marginBottom: '28px', padding: '16px', borderRadius: '10px', background: '#f8fafc', border: '1px dashed #cbd5e1' }}>
-                <label style={{ display: 'block', fontWeight: 800, fontSize: '14px', marginBottom: '4px' }}>
-                  🎥 Product Craft Video (Optional)
-                </label>
-                <p style={{ fontSize: '12px', color: '#64748b', margin: '0 0 12px' }}>
-                  Add a real craft making or demonstration video (MP4).
-                </p>
+              {/* Availability & Status */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '22px' }}>
+                <div>
+                  <label style={{ display: 'block', fontWeight: 700, fontSize: '13px', marginBottom: '6px' }}>
+                    Availability
+                  </label>
+                  <select
+                    value={photoFormAvailability}
+                    onChange={(e) => setPhotoFormAvailability(e.target.value as ProductAvailability)}
+                    style={{
+                      width: '100%',
+                      padding: '11px 12px',
+                      borderRadius: '8px',
+                      border: '1px solid #cbd5e1',
+                      fontSize: '14px',
+                      background: '#fff',
+                    }}
+                  >
+                    <option value="in_stock">In Stock / Available</option>
+                    <option value="made_to_order">Made to Order</option>
+                    <option value="out_of_stock">Out of Stock</option>
+                  </select>
+                </div>
 
+                <div>
+                  <label style={{ display: 'block', fontWeight: 700, fontSize: '13px', marginBottom: '6px' }}>
+                    Publication
+                  </label>
+                  <select
+                    value={photoFormPublished ? 'true' : 'false'}
+                    onChange={(e) => setPhotoFormPublished(e.target.value === 'true')}
+                    style={{
+                      width: '100%',
+                      padding: '11px 12px',
+                      borderRadius: '8px',
+                      border: '1px solid #cbd5e1',
+                      fontSize: '14px',
+                      background: '#fff',
+                    }}
+                  >
+                    <option value="true">Published (Visible on website)</option>
+                    <option value="false">Draft (Hidden from website)</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Tags */}
+              <div style={{ marginBottom: '24px' }}>
+                <label style={{ display: 'block', fontWeight: 700, fontSize: '13px', marginBottom: '6px' }}>
+                  Search Tags (optional)
+                </label>
                 <input
-                  type="file"
-                  accept="video/mp4"
-                  onChange={handleSelectFormVideo}
-                  id="form-video-input"
-                  style={{ display: 'none' }}
-                />
-
-                <label
-                  htmlFor="form-video-input"
+                  type="text"
+                  value={photoFormTags}
+                  onChange={(e) => setPhotoFormTags(e.target.value)}
+                  placeholder="e.g. resin blue clock gold flakes"
                   style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '8px',
-                    background: '#ffffff',
-                    border: '1px solid #cbd5e1',
+                    width: '100%',
+                    padding: '11px 14px',
                     borderRadius: '8px',
-                    padding: '11px 18px',
-                    fontSize: '13px',
-                    fontWeight: 700,
-                    color: '#182235',
-                    cursor: 'pointer',
-                    boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+                    border: '1px solid #cbd5e1',
+                    fontSize: '14px',
+                    boxSizing: 'border-box',
                   }}
-                >
-                  <span>🎥</span> Select Video from Gallery
-                </label>
-
-                {(formVideoPreview || formExistingVideo) && (
-                  <div style={{ marginTop: '14px', maxWidth: '320px', position: 'relative' }}>
-                    <video
-                      src={formVideoPreview || formExistingVideo}
-                      controls
-                      playsInline
-                      style={{ width: '100%', borderRadius: '8px', maxHeight: '180px', background: '#000' }}
-                    />
-                    {formVideoPreview && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setFormVideoFile(null);
-                          setFormVideoPreview('');
-                        }}
-                        style={{
-                          position: 'absolute',
-                          top: '6px',
-                          right: '6px',
-                          background: '#ef4444',
-                          color: '#fff',
-                          border: 'none',
-                          borderRadius: '50%',
-                          width: '24px',
-                          height: '24px',
-                          fontSize: '13px',
-                          fontWeight: 800,
-                          cursor: 'pointer',
-                        }}
-                      >
-                        ✕
-                      </button>
-                    )}
-                  </div>
-                )}
+                />
               </div>
 
-              {/* Submit Buttons */}
-              <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-                <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  style={{
-                    background: isSubmitting ? '#94a3b8' : '#15803d',
-                    color: '#ffffff',
-                    border: 'none',
-                    borderRadius: '8px',
-                    padding: '13px 26px',
-                    fontSize: '15px',
-                    fontWeight: 800,
-                    cursor: isSubmitting ? 'not-allowed' : 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '8px',
-                    boxShadow: '0 4px 12px rgba(21, 128, 61, 0.25)',
-                  }}
-                >
-                  {isSubmitting ? 'Saving product...' : '💾 Save Product to Website'}
-                </button>
+              {/* Action Buttons */}
+              <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
                 <button
                   type="button"
                   onClick={() => setActiveSection('products')}
                   style={{
-                    background: '#ffffff',
+                    background: '#f1f5f9',
                     border: '1px solid #cbd5e1',
                     borderRadius: '8px',
-                    padding: '13px 20px',
+                    padding: '12px 20px',
                     fontSize: '14px',
                     fontWeight: 700,
-                    color: '#64748b',
+                    color: '#475569',
                     cursor: 'pointer',
                   }}
                 >
                   Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isPhotoFormSubmitting}
+                  style={{
+                    background: 'linear-gradient(135deg, #d8b45a 0%, #c9a24d 100%)',
+                    color: '#182235',
+                    border: 'none',
+                    borderRadius: '8px',
+                    padding: '12px 28px',
+                    fontSize: '14px',
+                    fontWeight: 800,
+                    cursor: isPhotoFormSubmitting ? 'not-allowed' : 'pointer',
+                    boxShadow: '0 4px 12px rgba(201, 162, 77, 0.35)',
+                  }}
+                >
+                  {isPhotoFormSubmitting ? 'Saving to Database...' : 'Save Product'}
                 </button>
               </div>
             </form>
@@ -1690,7 +1891,355 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         )}
 
         {/* ============================================================
-            3. MANAGE PRODUCTS LIST
+            3. ADD VIDEO PRODUCT FORM (WITH MANDATORY PHOTO VALIDATION)
+            ============================================================ */}
+        {activeSection === 'add-video-product' && (
+          <div style={{ maxWidth: '820px', margin: '0 auto' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px' }}>
+              <div>
+                <button
+                  type="button"
+                  onClick={() => setActiveSection('products')}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: '#64748b',
+                    fontSize: '13px',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    padding: 0,
+                    marginBottom: '4px',
+                  }}
+                >
+                  ← Back to Products
+                </button>
+                <h1 style={{ fontSize: '24px', fontWeight: 800, margin: 0, color: '#0f172a' }}>
+                  Add Video Product
+                </h1>
+                <p style={{ margin: '4px 0 0', color: '#64748b', fontSize: '13px' }}>
+                  Every video product requires at least one product photo for the storefront card and video poster.
+                </p>
+              </div>
+            </div>
+
+            <form
+              onSubmit={handleSaveVideoProduct}
+              style={{
+                background: '#ffffff',
+                borderRadius: '14px',
+                border: '1px solid #e7e2d8',
+                padding: '28px',
+                boxShadow: '0 2px 10px rgba(0,0,0,0.03)',
+              }}
+            >
+              {/* Mandatory Photo Warning Alert if triggered */}
+              {videoPhotoError && (
+                <div
+                  style={{
+                    background: '#fef2f2',
+                    border: '1px solid #f87171',
+                    borderRadius: '10px',
+                    padding: '14px 18px',
+                    marginBottom: '20px',
+                    color: '#991b1b',
+                    fontSize: '14px',
+                    fontWeight: 700,
+                  }}
+                >
+                  ⚠️ Please add at least one product photo before publishing this video product.
+                </div>
+              )}
+
+              {/* Product Name */}
+              <div style={{ marginBottom: '20px' }}>
+                <label style={{ display: 'block', fontWeight: 700, fontSize: '13px', marginBottom: '6px' }}>
+                  Product Name *
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={videoFormName}
+                  onChange={(e) => setVideoFormName(e.target.value)}
+                  placeholder="e.g. Handmade Resin Pooja Thali Video Showcase"
+                  style={{
+                    width: '100%',
+                    padding: '12px 14px',
+                    borderRadius: '8px',
+                    border: '1px solid #cbd5e1',
+                    fontSize: '15px',
+                    boxSizing: 'border-box',
+                    outline: 'none',
+                  }}
+                />
+              </div>
+
+              {/* Category */}
+              <div style={{ marginBottom: '20px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                  <label style={{ fontWeight: 700, fontSize: '13px' }}>Category *</label>
+                  <button
+                    type="button"
+                    onClick={() => setVideoFormNewCatInline(!videoFormNewCatInline)}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: '#b45309',
+                      fontSize: '12px',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      padding: 0,
+                    }}
+                  >
+                    {videoFormNewCatInline ? 'Choose Existing' : '＋ Create New Category'}
+                  </button>
+                </div>
+
+                {!videoFormNewCatInline ? (
+                  <select
+                    value={videoFormCategory}
+                    onChange={(e) => setVideoFormCategory(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '12px 14px',
+                      borderRadius: '8px',
+                      border: '1px solid #cbd5e1',
+                      fontSize: '14px',
+                      boxSizing: 'border-box',
+                      background: '#fff',
+                    }}
+                  >
+                    {categories.map((c) => (
+                      <option key={c.id} value={c.name}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    type="text"
+                    value={videoFormNewCatName}
+                    onChange={(e) => setVideoFormNewCatName(e.target.value)}
+                    placeholder="Type new category name..."
+                    style={{
+                      width: '100%',
+                      padding: '12px 14px',
+                      borderRadius: '8px',
+                      border: '1px solid #c9a24d',
+                      fontSize: '14px',
+                      boxSizing: 'border-box',
+                    }}
+                  />
+                )}
+              </div>
+
+              {/* MANDATORY PRODUCT PHOTO PICKER */}
+              <div
+                style={{
+                  marginBottom: '22px',
+                  padding: '18px',
+                  background: '#fefefe',
+                  border: videoPhotoError ? '2px solid #ef4444' : '1px solid #e2e8f0',
+                  borderRadius: '12px',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                  <label style={{ fontWeight: 800, fontSize: '14px', color: '#0f172a' }}>
+                    Required Product Photo *
+                  </label>
+                  <span style={{ fontSize: '12px', color: '#e11d48', fontWeight: 700 }}>
+                    Mandatory for Published Video Products
+                  </span>
+                </div>
+                <p style={{ fontSize: '12px', color: '#64748b', margin: '0 0 12px' }}>
+                  This image will be displayed on the storefront card and as the video poster.
+                </p>
+
+                <input
+                  type="file"
+                  ref={videoFormPhotoPickerRef}
+                  accept="image/jpeg,image/png,image/webp"
+                  style={{ display: 'none' }}
+                  onChange={handleSelectVideoPhoto}
+                />
+
+                {!videoFormPhotoPreview ? (
+                  <div
+                    onClick={() => videoFormPhotoPickerRef.current?.click()}
+                    style={{
+                      border: '2px dashed #c9a24d',
+                      borderRadius: '8px',
+                      padding: '24px 14px',
+                      textAlign: 'center',
+                      background: '#fffdf8',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <div style={{ fontSize: '28px', marginBottom: '4px' }}>📷</div>
+                    <div style={{ fontSize: '13px', fontWeight: 700, color: '#0f172a' }}>
+                      Choose Product Photo from device
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                    <img
+                      src={videoFormPhotoPreview}
+                      alt="Product preview"
+                      style={{ width: '100px', height: '100px', objectFit: 'cover', borderRadius: '8px', border: '2px solid #16a34a' }}
+                    />
+                    <div>
+                      <div style={{ color: '#16a34a', fontWeight: 700, fontSize: '13px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        ✓ Photo attached successfully
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => videoFormPhotoPickerRef.current?.click()}
+                        style={{
+                          background: '#f1f5f9',
+                          border: '1px solid #cbd5e1',
+                          borderRadius: '6px',
+                          padding: '6px 12px',
+                          fontSize: '12px',
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                          marginTop: '8px',
+                        }}
+                      >
+                        Replace Photo
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* VIDEO FILE PICKER */}
+              <div style={{ marginBottom: '22px' }}>
+                <label style={{ display: 'block', fontWeight: 800, fontSize: '14px', marginBottom: '6px', color: '#0f172a' }}>
+                  Video File (MP4, WEBM, MOV) *
+                </label>
+
+                <input
+                  type="file"
+                  ref={videoFormVideoPickerRef}
+                  accept="video/mp4,video/webm,video/quicktime"
+                  style={{ display: 'none' }}
+                  onChange={handleSelectVideoFile}
+                />
+
+                {!videoFormVideoPreview ? (
+                  <div
+                    onClick={() => videoFormVideoPickerRef.current?.click()}
+                    style={{
+                      border: '2px dashed #9333ea',
+                      borderRadius: '10px',
+                      padding: '28px 16px',
+                      textAlign: 'center',
+                      background: '#faf5ff',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <div style={{ fontSize: '32px', marginBottom: '6px' }}>🎬</div>
+                    <div style={{ fontSize: '14px', fontWeight: 700, color: '#581c87' }}>
+                      Select Demonstration Video from device
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#7e22ce', marginTop: '2px' }}>
+                      Upload high quality craft showcase video
+                    </div>
+                  </div>
+                ) : (
+                  <div>
+                    <video
+                      controls
+                      src={videoFormVideoPreview}
+                      style={{ width: '100%', maxHeight: '320px', borderRadius: '8px', background: '#000', display: 'block' }}
+                    />
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '8px' }}>
+                      <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 600 }}>
+                        Size: {videoFormFileSize}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => videoFormVideoPickerRef.current?.click()}
+                        style={{
+                          background: '#f1f5f9',
+                          border: '1px solid #cbd5e1',
+                          borderRadius: '6px',
+                          padding: '6px 12px',
+                          fontSize: '12px',
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        Replace Video
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Description */}
+              <div style={{ marginBottom: '20px' }}>
+                <label style={{ display: 'block', fontWeight: 700, fontSize: '13px', marginBottom: '6px' }}>
+                  Description
+                </label>
+                <textarea
+                  rows={3}
+                  value={videoFormDesc}
+                  onChange={(e) => setVideoFormDesc(e.target.value)}
+                  placeholder="Describe what is demonstrated in the video..."
+                  style={{
+                    width: '100%',
+                    padding: '12px 14px',
+                    borderRadius: '8px',
+                    border: '1px solid #cbd5e1',
+                    fontSize: '14px',
+                    boxSizing: 'border-box',
+                    fontFamily: 'inherit',
+                  }}
+                />
+              </div>
+
+              {/* Action Buttons */}
+              <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', marginTop: '26px' }}>
+                <button
+                  type="button"
+                  onClick={() => setActiveSection('products')}
+                  style={{
+                    background: '#f1f5f9',
+                    border: '1px solid #cbd5e1',
+                    borderRadius: '8px',
+                    padding: '12px 20px',
+                    fontSize: '14px',
+                    fontWeight: 700,
+                    color: '#475569',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isVideoFormSubmitting}
+                  style={{
+                    background: 'linear-gradient(135deg, #7e22ce 0%, #6b21a8 100%)',
+                    color: '#ffffff',
+                    border: 'none',
+                    borderRadius: '8px',
+                    padding: '12px 28px',
+                    fontSize: '14px',
+                    fontWeight: 800,
+                    cursor: isVideoFormSubmitting ? 'not-allowed' : 'pointer',
+                    boxShadow: '0 4px 12px rgba(126, 34, 206, 0.35)',
+                  }}
+                >
+                  {isVideoFormSubmitting ? 'Publishing Video...' : 'Publish Video Product'}
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
+
+        {/* ============================================================
+            4. MANAGE PRODUCTS SECTION
             ============================================================ */}
         {activeSection === 'products' && (
           <div>
@@ -1708,59 +2257,73 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <h1 style={{ fontSize: '24px', fontWeight: 800, margin: '0 0 4px', color: '#0f172a' }}>
                   Manage Products
                 </h1>
-                <p style={{ margin: 0, fontSize: '13px', color: '#64748b' }}>
-                  Edit names, descriptions, photos, and availability.
+                <p style={{ margin: 0, color: '#64748b', fontSize: '13px' }}>
+                  Showing {filteredProducts.length} of {products.length} products
                 </p>
               </div>
 
-              <button
-                type="button"
-                onClick={handleOpenAddProduct}
-                style={{
-                  background: 'linear-gradient(135deg, #182235 0%, #0f172a 100%)',
-                  color: '#ffffff',
-                  border: 'none',
-                  borderRadius: '8px',
-                  padding: '10px 18px',
-                  fontSize: '13px',
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                }}
-              >
-                <span>＋</span> Add New Product
-              </button>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  onClick={handleOpenAddPhotoProduct}
+                  style={{
+                    background: 'linear-gradient(135deg, #d8b45a 0%, #c9a24d 100%)',
+                    color: '#182235',
+                    border: 'none',
+                    borderRadius: '8px',
+                    padding: '9px 16px',
+                    fontSize: '13px',
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                  }}
+                >
+                  ＋ Add Photo Product
+                </button>
+                <button
+                  type="button"
+                  onClick={handleOpenAddVideoProduct}
+                  style={{
+                    background: '#182235',
+                    color: '#ffffff',
+                    border: 'none',
+                    borderRadius: '8px',
+                    padding: '9px 16px',
+                    fontSize: '13px',
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                  }}
+                >
+                  🎬 Add Video Product
+                </button>
+              </div>
             </div>
 
-            {/* Search and filter controls */}
+            {/* Search and Filters Bar */}
             <div
               style={{
                 background: '#ffffff',
-                padding: '14px 16px',
-                borderRadius: '12px',
                 border: '1px solid #e7e2d8',
-                marginBottom: '16px',
+                borderRadius: '12px',
+                padding: '16px',
+                marginBottom: '20px',
                 display: 'flex',
-                gap: '10px',
                 flexWrap: 'wrap',
+                gap: '12px',
                 alignItems: 'center',
               }}
             >
               <input
                 type="text"
+                placeholder="Search by name, ID (e.g. AK-001) or tags..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search your products by name, category, or ID..."
                 style={{
-                  flex: 1,
-                  minWidth: '220px',
-                  padding: '9px 12px',
-                  borderRadius: '6px',
+                  flex: '1 1 240px',
+                  padding: '10px 14px',
+                  borderRadius: '8px',
                   border: '1px solid #cbd5e1',
-                  fontSize: '13px',
-                  outline: 'none',
+                  fontSize: '14px',
+                  boxSizing: 'border-box',
                 }}
               />
 
@@ -1768,8 +2331,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 value={categoryFilter}
                 onChange={(e) => setCategoryFilter(e.target.value)}
                 style={{
-                  padding: '9px 12px',
-                  borderRadius: '6px',
+                  padding: '10px 12px',
+                  borderRadius: '8px',
                   border: '1px solid #cbd5e1',
                   fontSize: '13px',
                   background: '#fff',
@@ -1784,792 +2347,606 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </select>
 
               <select
-                value={availabilityFilter}
-                onChange={(e) => setAvailabilityFilter(e.target.value)}
+                value={typeFilter}
+                onChange={(e) => setTypeFilter(e.target.value as any)}
                 style={{
-                  padding: '9px 12px',
-                  borderRadius: '6px',
+                  padding: '10px 12px',
+                  borderRadius: '8px',
                   border: '1px solid #cbd5e1',
                   fontSize: '13px',
                   background: '#fff',
                 }}
               >
-                <option value="all">All Statuses</option>
+                <option value="all">All Media Types</option>
+                <option value="photo">Photo Only</option>
+                <option value="video">Has Video Showcase</option>
+              </select>
+
+              <select
+                value={availabilityFilter}
+                onChange={(e) => setAvailabilityFilter(e.target.value)}
+                style={{
+                  padding: '10px 12px',
+                  borderRadius: '8px',
+                  border: '1px solid #cbd5e1',
+                  fontSize: '13px',
+                  background: '#fff',
+                }}
+              >
+                <option value="all">All Availability</option>
                 <option value="in_stock">In Stock</option>
                 <option value="made_to_order">Made to Order</option>
                 <option value="out_of_stock">Out of Stock</option>
               </select>
-            </div>
 
-            <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '12px' }}>
-              Showing {filteredProducts.length} of {products.length} products
-            </div>
-
-            {/* Products List */}
-            <div style={{ display: 'grid', gap: '10px' }}>
-              {filteredProducts.length === 0 ? (
-                <div style={{ background: '#fff', padding: '40px', textAlign: 'center', borderRadius: '12px', color: '#64748b' }}>
-                  No products matched your search.
-                </div>
-              ) : (
-                filteredProducts.map((p) => {
-                  const availColor =
-                    p.availability === 'out_of_stock'
-                      ? '#dc2626'
-                      : p.availability === 'made_to_order'
-                      ? '#d97706'
-                      : '#16a34a';
-
-                  const availLabel =
-                    p.availability === 'out_of_stock'
-                      ? 'Out of Stock'
-                      : p.availability === 'made_to_order'
-                      ? 'Made to Order'
-                      : 'In Stock';
-
-                  return (
-                    <article
-                      key={p.id}
-                      style={{
-                        background: '#ffffff',
-                        border: '1px solid #e7e2d8',
-                        borderRadius: '10px',
-                        padding: '12px 16px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        flexWrap: 'wrap',
-                        gap: '12px',
-                      }}
-                    >
-                      {/* Left: Thumbnail & Name */}
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '14px', minWidth: '260px', flex: 1 }}>
-                        <img
-                          src={p.image_url || '/logo.png'}
-                          alt={p.name}
-                          style={{
-                            width: '56px',
-                            height: '56px',
-                            objectFit: 'cover',
-                            borderRadius: '8px',
-                            border: '1px solid #e2e8f0',
-                            background: '#fafafa',
-                            flexShrink: 0,
-                          }}
-                          onError={handleImageError}
-                        />
-                        <div>
-                          <div style={{ fontWeight: 800, fontSize: '15px', color: '#0f172a' }}>
-                            {p.name}
-                          </div>
-                          <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px', display: 'flex', gap: '8px', alignItems: 'center' }}>
-                            <span style={{ fontWeight: 600, color: '#0369a1' }}>{p.category}</span>
-                            <span>•</span>
-                            <span style={{ fontFamily: 'monospace', fontSize: '11px' }}>{p.id}</span>
-                            {p.video_url && <span style={{ color: '#a21caf', fontWeight: 700 }}>🎥 Video attached</span>}
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Middle: Availability Pill */}
-                      <span
-                        style={{
-                          fontSize: '11px',
-                          fontWeight: 700,
-                          padding: '4px 10px',
-                          borderRadius: '20px',
-                          background: `${availColor}15`,
-                          color: availColor,
-                          border: `1px solid ${availColor}40`,
-                        }}
-                      >
-                        {availLabel}
-                      </span>
-
-                      {/* Right: Actions */}
-                      <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-                        <button
-                          type="button"
-                          onClick={() => handleOpenEditProduct(p)}
-                          style={{
-                            background: '#182235',
-                            color: '#ffffff',
-                            border: 'none',
-                            borderRadius: '6px',
-                            padding: '8px 12px',
-                            fontSize: '12px',
-                            fontWeight: 700,
-                            cursor: 'pointer',
-                          }}
-                        >
-                          ✏️ Edit
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setQuickUploadProductId(p.id);
-                            quickPhotoPickerRef.current?.click();
-                          }}
-                          title="Replace product photo"
-                          style={{
-                            background: '#ffffff',
-                            color: '#334155',
-                            border: '1px solid #cbd5e1',
-                            borderRadius: '6px',
-                            padding: '8px 10px',
-                            fontSize: '12px',
-                            fontWeight: 700,
-                            cursor: 'pointer',
-                          }}
-                        >
-                          📷 Photo
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setQuickUploadProductId(p.id);
-                            quickVideoPickerRef.current?.click();
-                          }}
-                          title="Attach or replace video"
-                          style={{
-                            background: '#ffffff',
-                            color: '#334155',
-                            border: '1px solid #cbd5e1',
-                            borderRadius: '6px',
-                            padding: '8px 10px',
-                            fontSize: '12px',
-                            fontWeight: 700,
-                            cursor: 'pointer',
-                          }}
-                        >
-                          🎥 Video
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => setProductToDelete(p)}
-                          style={{
-                            background: '#fee2e2',
-                            color: '#dc2626',
-                            border: 'none',
-                            borderRadius: '6px',
-                            padding: '8px 10px',
-                            fontSize: '12px',
-                            fontWeight: 700,
-                            cursor: 'pointer',
-                          }}
-                        >
-                          🗑️
-                        </button>
-                      </div>
-                    </article>
-                  );
-                })
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* ============================================================
-            4. PHOTO UPLOAD SECTION
-            ============================================================ */}
-        {activeSection === 'images' && (
-          <div style={{ maxWidth: '820px', margin: '0 auto' }}>
-            <h1 style={{ fontSize: '24px', fontWeight: 800, margin: '0 0 4px', color: '#0f172a' }}>
-              Upload Photos
-            </h1>
-            <p style={{ margin: '0 0 20px', color: '#64748b', fontSize: '13px' }}>
-              Choose pictures directly from your phone or computer.
-            </p>
-
-            <div
-              style={{
-                background: '#ffffff',
-                borderRadius: '14px',
-                border: '1px solid #e7e2d8',
-                padding: '28px',
-                boxShadow: '0 2px 10px rgba(0,0,0,0.03)',
-                marginBottom: '28px',
-              }}
-            >
-              {/* Product Target Dropdown */}
-              <div style={{ marginBottom: '18px' }}>
-                <label style={{ display: 'block', fontWeight: 700, fontSize: '13px', marginBottom: '6px' }}>
-                  Which product is this photo for?
-                </label>
-                <select
-                  value={photoTargetProduct}
-                  onChange={(e) => setPhotoTargetProduct(e.target.value)}
-                  style={{
-                    width: '100%',
-                    padding: '11px 14px',
-                    borderRadius: '8px',
-                    border: '1px solid #cbd5e1',
-                    fontSize: '14px',
-                    background: '#fff',
-                  }}
-                >
-                  <option value="">Choose a product (optional)</option>
-                  {products.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name} ({p.id})
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Upload Drop Zone */}
-              <input
-                type="file"
-                multiple
-                ref={dedicatedPhotoPickerRef}
-                accept="image/jpeg,image/png,image/webp"
-                style={{ display: 'none' }}
-                onChange={(e) => {
-                  const files = Array.from(e.target.files || []);
-                  if (!files.length) return;
-                  setPhotoUploadFiles((prev) => [...prev, ...files]);
-                  files.forEach((f) => {
-                    const reader = new FileReader();
-                    reader.onload = (ev) => {
-                      if (ev.target?.result) {
-                        setPhotoUploadPreviews((prev) => [...prev, String(ev.target?.result)]);
-                      }
-                    };
-                    reader.readAsDataURL(f);
-                  });
-                }}
-              />
-
-              <div
-                onClick={() => dedicatedPhotoPickerRef.current?.click()}
+              <select
+                value={publishedFilter}
+                onChange={(e) => setPublishedFilter(e.target.value as any)}
                 style={{
-                  border: '2px dashed #c9a24d',
-                  borderRadius: '12px',
-                  padding: '36px 20px',
-                  textAlign: 'center',
-                  background: '#fefdfb',
-                  cursor: 'pointer',
-                  marginBottom: '20px',
-                }}
-              >
-                <div style={{ fontSize: '38px', marginBottom: '8px' }}>📷</div>
-                <div style={{ fontSize: '16px', fontWeight: 800, color: '#0f172a' }}>
-                  Tap here to select photos from your device
-                </div>
-                <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
-                  Select one or multiple photos (JPG, PNG, WEBP)
-                </div>
-              </div>
-
-              {/* Previews */}
-              {photoUploadPreviews.length > 0 && (
-                <div style={{ marginBottom: '20px' }}>
-                  <div style={{ fontSize: '13px', fontWeight: 700, marginBottom: '8px' }}>
-                    Selected Photos ({photoUploadPreviews.length}):
-                  </div>
-                  <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-                    {photoUploadPreviews.map((src, i) => (
-                      <div key={i} style={{ position: 'relative' }}>
-                        <img
-                          src={src}
-                          alt="preview"
-                          style={{ width: '80px', height: '80px', objectFit: 'cover', borderRadius: '8px', border: '1px solid #cbd5e1' }}
-                        />
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setPhotoUploadPreviews((prev) => prev.filter((_, idx) => idx !== i));
-                            setPhotoUploadFiles((prev) => prev.filter((_, idx) => idx !== i));
-                          }}
-                          style={{
-                            position: 'absolute',
-                            top: '-6px',
-                            right: '-6px',
-                            background: '#ef4444',
-                            color: '#fff',
-                            border: 'none',
-                            borderRadius: '50%',
-                            width: '20px',
-                            height: '20px',
-                            fontSize: '11px',
-                            cursor: 'pointer',
-                          }}
-                        >
-                          ✕
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              <button
-                type="button"
-                disabled={photoUploading || photoUploadFiles.length === 0}
-                onClick={handleDedicatedPhotoUpload}
-                style={{
-                  background: photoUploading || photoUploadFiles.length === 0 ? '#94a3b8' : '#15803d',
-                  color: '#ffffff',
-                  border: 'none',
+                  padding: '10px 12px',
                   borderRadius: '8px',
-                  padding: '12px 24px',
-                  fontSize: '14px',
-                  fontWeight: 800,
-                  cursor: photoUploading || photoUploadFiles.length === 0 ? 'not-allowed' : 'pointer',
-                }}
-              >
-                {photoUploading ? 'Uploading...' : 'Upload Photos Now'}
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* ============================================================
-            5. VIDEO UPLOAD SECTION
-            ============================================================ */}
-        {activeSection === 'videos' && (
-          <div style={{ maxWidth: '820px', margin: '0 auto' }}>
-            <h1 style={{ fontSize: '24px', fontWeight: 800, margin: '0 0 4px', color: '#0f172a' }}>
-              Upload Videos
-            </h1>
-            <p style={{ margin: '0 0 20px', color: '#64748b', fontSize: '13px' }}>
-              Add a craft demonstration video to your website.
-            </p>
-
-            <div
-              style={{
-                background: '#ffffff',
-                borderRadius: '14px',
-                border: '1px solid #e7e2d8',
-                padding: '28px',
-                boxShadow: '0 2px 10px rgba(0,0,0,0.03)',
-                marginBottom: '28px',
-              }}
-            >
-              {/* Product Target Dropdown */}
-              <div style={{ marginBottom: '18px' }}>
-                <label style={{ display: 'block', fontWeight: 700, fontSize: '13px', marginBottom: '6px' }}>
-                  Which product does this video showcase? *
-                </label>
-                <select
-                  value={videoTargetProduct}
-                  onChange={(e) => setVideoTargetProduct(e.target.value)}
-                  style={{
-                    width: '100%',
-                    padding: '11px 14px',
-                    borderRadius: '8px',
-                    border: '1px solid #cbd5e1',
-                    fontSize: '14px',
-                    background: '#fff',
-                  }}
-                >
-                  <option value="">Select product to attach video...</option>
-                  {products.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name} ({p.id}) {p.video_url ? '— [Has Video]' : ''}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Upload Drop Zone */}
-              <input
-                type="file"
-                ref={dedicatedVideoPickerRef}
-                accept="video/mp4"
-                style={{ display: 'none' }}
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (!file) return;
-                  setVideoUploadFile(file);
-                  setVideoUploadPreview(URL.createObjectURL(file));
-                }}
-              />
-
-              <div
-                onClick={() => dedicatedVideoPickerRef.current?.click()}
-                style={{
-                  border: '2px dashed #0284c7',
-                  borderRadius: '12px',
-                  padding: '36px 20px',
-                  textAlign: 'center',
-                  background: '#f0f9ff',
-                  cursor: 'pointer',
-                  marginBottom: '20px',
-                }}
-              >
-                <div style={{ fontSize: '38px', marginBottom: '8px' }}>🎥</div>
-                <div style={{ fontSize: '16px', fontWeight: 800, color: '#0f172a' }}>
-                  Tap here to select a video from your device
-                </div>
-                <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
-                  Supports MP4 format videos
-                </div>
-              </div>
-
-              {/* Video Player Preview */}
-              {videoUploadPreview && (
-                <div style={{ marginBottom: '20px', maxWidth: '360px' }}>
-                  <video
-                    src={videoUploadPreview}
-                    controls
-                    playsInline
-                    style={{ width: '100%', maxHeight: '220px', borderRadius: '8px', background: '#000' }}
-                  />
-                  <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
-                    {videoUploadFile?.name} ({(videoUploadFile!.size / (1024 * 1024)).toFixed(1)} MB)
-                  </div>
-                </div>
-              )}
-
-              <button
-                type="button"
-                disabled={videoUploading || !videoUploadFile}
-                onClick={handleDedicatedVideoUpload}
-                style={{
-                  background: videoUploading || !videoUploadFile ? '#94a3b8' : '#0284c7',
-                  color: '#ffffff',
-                  border: 'none',
-                  borderRadius: '8px',
-                  padding: '12px 24px',
-                  fontSize: '14px',
-                  fontWeight: 800,
-                  cursor: videoUploading || !videoUploadFile ? 'not-allowed' : 'pointer',
-                }}
-              >
-                {videoUploading ? 'Uploading video...' : 'Upload Video Now'}
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* ============================================================
-            6. CATEGORIES SECTION
-            ============================================================ */}
-        {activeSection === 'categories' && (
-          <div style={{ maxWidth: '820px', margin: '0 auto' }}>
-            <h1 style={{ fontSize: '24px', fontWeight: 800, margin: '0 0 4px', color: '#0f172a' }}>
-              Categories
-            </h1>
-            <p style={{ margin: '0 0 20px', color: '#64748b', fontSize: '13px' }}>
-              Organize your products into collections.
-            </p>
-
-            {/* Add Category Form */}
-            <form
-              onSubmit={handleAddCategory}
-              style={{
-                background: '#ffffff',
-                padding: '16px',
-                borderRadius: '12px',
-                border: '1px solid #e7e2d8',
-                marginBottom: '20px',
-                display: 'flex',
-                gap: '10px',
-              }}
-            >
-              <input
-                type="text"
-                required
-                value={categoryInputName}
-                onChange={(e) => setCategoryInputName(e.target.value)}
-                placeholder="New Category Name (e.g. Diya Holders, Wall Art)..."
-                style={{
-                  flex: 1,
-                  padding: '10px 14px',
-                  borderRadius: '6px',
                   border: '1px solid #cbd5e1',
-                  fontSize: '14px',
-                  outline: 'none',
-                }}
-              />
-              <button
-                type="submit"
-                style={{
-                  background: '#182235',
-                  color: '#ffffff',
-                  border: 'none',
-                  borderRadius: '6px',
-                  padding: '10px 18px',
                   fontSize: '13px',
-                  fontWeight: 700,
-                  cursor: 'pointer',
+                  background: '#fff',
                 }}
               >
-                ＋ Add Category
-              </button>
-            </form>
-
-            {/* Category List */}
-            <div style={{ display: 'grid', gap: '8px' }}>
-              {categories.map((cat) => {
-                const count = products.filter((p) => p.category.toLowerCase() === cat.name.toLowerCase()).length;
-                const isEditing = editingCategoryId === cat.id;
-
-                return (
-                  <div
-                    key={cat.id}
-                    style={{
-                      background: '#ffffff',
-                      border: '1px solid #e7e2d8',
-                      borderRadius: '8px',
-                      padding: '14px 18px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      flexWrap: 'wrap',
-                      gap: '12px',
-                    }}
-                  >
-                    {!isEditing ? (
-                      <div>
-                        <span style={{ fontWeight: 800, fontSize: '15px', color: '#0f172a' }}>{cat.name}</span>
-                        <span style={{ fontSize: '12px', color: '#64748b', marginLeft: '10px' }}>
-                          ({count} product{count === 1 ? '' : 's'})
-                        </span>
-                      </div>
-                    ) : (
-                      <div style={{ display: 'flex', gap: '8px', flex: 1, maxWidth: '400px' }}>
-                        <input
-                          type="text"
-                          value={editingCategoryName}
-                          onChange={(e) => setEditingCategoryName(e.target.value)}
-                          style={{
-                            flex: 1,
-                            padding: '6px 10px',
-                            borderRadius: '4px',
-                            border: '1px solid #c9a24d',
-                            fontSize: '14px',
-                          }}
-                        />
-                        <button
-                          type="button"
-                          onClick={() => handleRenameCategory(cat)}
-                          style={{
-                            background: '#15803d',
-                            color: '#fff',
-                            border: 'none',
-                            borderRadius: '4px',
-                            padding: '6px 12px',
-                            fontSize: '12px',
-                            fontWeight: 700,
-                          }}
-                        >
-                          Save
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setEditingCategoryId(null)}
-                          style={{
-                            background: '#e2e8f0',
-                            color: '#334155',
-                            border: 'none',
-                            borderRadius: '4px',
-                            padding: '6px 10px',
-                            fontSize: '12px',
-                          }}
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    )}
-
-                    {!isEditing && (
-                      <div style={{ display: 'flex', gap: '6px' }}>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setEditingCategoryId(cat.id);
-                            setEditingCategoryName(cat.name);
-                          }}
-                          style={{
-                            background: '#f1f5f9',
-                            border: '1px solid #cbd5e1',
-                            borderRadius: '4px',
-                            padding: '6px 10px',
-                            fontSize: '12px',
-                            fontWeight: 600,
-                            cursor: 'pointer',
-                          }}
-                        >
-                          Rename
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteCategory(cat)}
-                          disabled={count > 0}
-                          title={count > 0 ? 'Cannot delete category with products' : 'Delete category'}
-                          style={{
-                            background: count > 0 ? '#f1f5f9' : '#fee2e2',
-                            color: count > 0 ? '#94a3b8' : '#dc2626',
-                            border: 'none',
-                            borderRadius: '4px',
-                            padding: '6px 10px',
-                            fontSize: '12px',
-                            fontWeight: 600,
-                            cursor: count > 0 ? 'not-allowed' : 'pointer',
-                          }}
-                        >
-                          Delete
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* ============================================================
-            7. MEDIA LIBRARY SECTION
-            ============================================================ */}
-        {activeSection === 'media-gallery' && (
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', marginBottom: '20px' }}>
-              <div>
-                <h1 style={{ fontSize: '24px', fontWeight: 800, margin: '0 0 4px', color: '#0f172a' }}>
-                  Media Library
-                </h1>
-                <p style={{ margin: 0, fontSize: '13px', color: '#64748b' }}>
-                  View and manage all uploaded product photos and craft videos.
-                </p>
-              </div>
-
-              {/* Filter pills */}
-              <div style={{ display: 'flex', gap: '6px' }}>
-                <button
-                  type="button"
-                  onClick={() => setMediaFilter('all')}
-                  style={{
-                    background: mediaFilter === 'all' ? '#182235' : '#ffffff',
-                    color: mediaFilter === 'all' ? '#fff' : '#334155',
-                    border: '1px solid #cbd5e1',
-                    borderRadius: '6px',
-                    padding: '6px 12px',
-                    fontSize: '12px',
-                    fontWeight: 700,
-                    cursor: 'pointer',
-                  }}
-                >
-                  All ({mediaList.length})
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setMediaFilter('image')}
-                  style={{
-                    background: mediaFilter === 'image' ? '#182235' : '#ffffff',
-                    color: mediaFilter === 'image' ? '#fff' : '#334155',
-                    border: '1px solid #cbd5e1',
-                    borderRadius: '6px',
-                    padding: '6px 12px',
-                    fontSize: '12px',
-                    fontWeight: 700,
-                    cursor: 'pointer',
-                  }}
-                >
-                  Photos
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setMediaFilter('video')}
-                  style={{
-                    background: mediaFilter === 'video' ? '#182235' : '#ffffff',
-                    color: mediaFilter === 'video' ? '#fff' : '#334155',
-                    border: '1px solid #cbd5e1',
-                    borderRadius: '6px',
-                    padding: '6px 12px',
-                    fontSize: '12px',
-                    fontWeight: 700,
-                    cursor: 'pointer',
-                  }}
-                >
-                  Videos
-                </button>
-              </div>
+                <option value="all">All Status</option>
+                <option value="published">Published</option>
+                <option value="draft">Drafts</option>
+              </select>
             </div>
 
-            {/* Media Grid */}
+            {/* Products Grid */}
             <div
               style={{
                 display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
-                gap: '14px',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
+                gap: '16px',
               }}
             >
+              {filteredProducts.map((p) => (
+                <div
+                  key={p.id}
+                  style={{
+                    background: '#ffffff',
+                    border: '1px solid #e7e2d8',
+                    borderRadius: '12px',
+                    padding: '16px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '12px',
+                  }}
+                >
+                  <div style={{ display: 'flex', gap: '14px', alignItems: 'flex-start' }}>
+                    <div style={{ position: 'relative', width: '80px', height: '80px', flexShrink: 0 }}>
+                      <img
+                        src={p.image_url || '/logo.png'}
+                        alt={p.name}
+                        onError={handleImageError}
+                        style={{
+                          width: '100%',
+                          height: '100%',
+                          objectFit: 'cover',
+                          borderRadius: '8px',
+                          border: '1px solid #cbd5e1',
+                        }}
+                      />
+                      {p.video_url && (
+                        <span
+                          style={{
+                            position: 'absolute',
+                            bottom: '4px',
+                            right: '4px',
+                            background: '#0f172a',
+                            color: '#38bdf8',
+                            fontSize: '9px',
+                            fontWeight: 800,
+                            padding: '1px 4px',
+                            borderRadius: '3px',
+                          }}
+                        >
+                          ▶ VID
+                        </span>
+                      )}
+                    </div>
+
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: '11px', fontWeight: 700, color: '#b45309', background: '#fef3c7', padding: '1px 6px', borderRadius: '4px' }}>
+                          {p.category}
+                        </span>
+                        <span style={{ fontSize: '10px', color: '#64748b' }}>
+                          ID: {p.id}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: '15px', fontWeight: 800, color: '#0f172a', marginTop: '4px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {p.name}
+                      </div>
+                      <div style={{ display: 'flex', gap: '6px', marginTop: '6px' }}>
+                        <span
+                          style={{
+                            fontSize: '10px',
+                            fontWeight: 700,
+                            padding: '2px 6px',
+                            borderRadius: '4px',
+                            background: p.published !== false ? '#dcfce7' : '#fee2e2',
+                            color: p.published !== false ? '#15803d' : '#991b1b',
+                          }}
+                        >
+                          {p.published !== false ? 'Published' : 'Draft'}
+                        </span>
+                        <span
+                          style={{
+                            fontSize: '10px',
+                            fontWeight: 700,
+                            padding: '2px 6px',
+                            borderRadius: '4px',
+                            background: p.availability === 'out_of_stock' ? '#fef2f2' : '#f0fdf4',
+                            color: p.availability === 'out_of_stock' ? '#991b1b' : '#166534',
+                          }}
+                        >
+                          {p.availability === 'out_of_stock' ? 'Out of Stock' : p.availability === 'made_to_order' ? 'Made to Order' : 'In Stock'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Actions Row */}
+                  <div style={{ display: 'flex', gap: '6px', marginTop: 'auto', paddingTop: '8px', borderTop: '1px solid #f1f5f9' }}>
+                    <button
+                      type="button"
+                      onClick={() => setViewDetailsItem(p)}
+                      style={{
+                        flex: 1,
+                        background: '#f8fafc',
+                        border: '1px solid #cbd5e1',
+                        borderRadius: '6px',
+                        padding: '6px 8px',
+                        fontSize: '11px',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      👁️ Details
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleOpenEditProduct(p)}
+                      style={{
+                        flex: 1,
+                        background: '#ffffff',
+                        border: '1px solid #c9a24d',
+                        color: '#785617',
+                        borderRadius: '6px',
+                        padding: '6px 8px',
+                        fontSize: '11px',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      ✏️ Edit
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleTogglePublish(p)}
+                      style={{
+                        background: p.published !== false ? '#fef3c7' : '#dcfce7',
+                        border: 'none',
+                        color: p.published !== false ? '#92400e' : '#166534',
+                        borderRadius: '6px',
+                        padding: '6px 8px',
+                        fontSize: '11px',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {p.published !== false ? 'Unpublish' : 'Publish'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setProductToDelete(p)}
+                      style={{
+                        background: '#fee2e2',
+                        border: 'none',
+                        color: '#991b1b',
+                        borderRadius: '6px',
+                        padding: '6px 8px',
+                        fontSize: '11px',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      🗑️
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ============================================================
+            5. COMPLETE VIDEO MANAGEMENT SECTION
+            ============================================================ */}
+        {activeSection === 'videos' && (
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
+              <div>
+                <h1 style={{ fontSize: '24px', fontWeight: 800, margin: '0 0 4px', color: '#0f172a' }}>
+                  Video Management
+                </h1>
+                <p style={{ margin: 0, color: '#64748b', fontSize: '13px' }}>
+                  {allVideos.length} craft demonstration videos attached to products.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleOpenAddVideoProduct}
+                style={{
+                  background: 'linear-gradient(135deg, #7e22ce 0%, #6b21a8 100%)',
+                  color: '#ffffff',
+                  border: 'none',
+                  borderRadius: '8px',
+                  padding: '10px 18px',
+                  fontSize: '13px',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                }}
+              >
+                ＋ Add Video Product
+              </button>
+            </div>
+
+            {/* Video Cards Grid */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '18px' }}>
+              {allVideos.map((v) => (
+                <div
+                  key={v.id}
+                  style={{
+                    background: '#ffffff',
+                    border: '1px solid #e7e2d8',
+                    borderRadius: '12px',
+                    overflow: 'hidden',
+                    display: 'flex',
+                    flexDirection: 'column',
+                  }}
+                >
+                  <div style={{ position: 'relative', background: '#090d16', height: '180px' }}>
+                    <video
+                      src={v.video_url}
+                      poster={v.image_url}
+                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setPlayingVideo({
+                          url: v.video_url,
+                          title: v.productName,
+                          productName: v.productName,
+                          productId: v.productId,
+                          category: v.category,
+                        })
+                      }
+                      style={{
+                        position: 'absolute',
+                        inset: 0,
+                        margin: 'auto',
+                        width: '54px',
+                        height: '54px',
+                        borderRadius: '50%',
+                        background: 'rgba(15, 23, 42, 0.85)',
+                        border: '2px solid rgba(255,255,255,0.4)',
+                        color: '#ffffff',
+                        fontSize: '22px',
+                        cursor: 'pointer',
+                        display: 'grid',
+                        placeItems: 'center',
+                        boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+                      }}
+                    >
+                      ▶
+                    </button>
+                    <span
+                      style={{
+                        position: 'absolute',
+                        top: '8px',
+                        left: '8px',
+                        background: 'rgba(15, 23, 42, 0.85)',
+                        color: '#f8fafc',
+                        padding: '3px 8px',
+                        borderRadius: '4px',
+                        fontSize: '11px',
+                        fontWeight: 700,
+                      }}
+                    >
+                      {v.category}
+                    </span>
+                  </div>
+
+                  <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', flex: 1 }}>
+                    <div style={{ fontSize: '15px', fontWeight: 800, color: '#0f172a' }}>
+                      {v.productName}
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
+                      Linked Product ID: <strong style={{ color: '#0f172a' }}>{v.productId}</strong>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '8px', marginTop: 'auto', paddingTop: '14px' }}>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setPlayingVideo({
+                            url: v.video_url,
+                            title: v.productName,
+                            productName: v.productName,
+                            productId: v.productId,
+                            category: v.category,
+                          })
+                        }
+                        style={{
+                          flex: 1,
+                          background: '#182235',
+                          color: '#ffffff',
+                          border: 'none',
+                          borderRadius: '6px',
+                          padding: '7px 10px',
+                          fontSize: '12px',
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        ▶ Play
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setVideoToDelete({
+                            productId: v.productId,
+                            mediaId: v.id,
+                            title: v.productName,
+                          })
+                        }
+                        style={{
+                          background: '#fee2e2',
+                          color: '#991b1b',
+                          border: 'none',
+                          borderRadius: '6px',
+                          padding: '7px 10px',
+                          fontSize: '12px',
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        Delete Video Only
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ============================================================
+            6. COMPLETE PHOTO MANAGEMENT SECTION
+            ============================================================ */}
+        {activeSection === 'images' && (
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
+              <div>
+                <h1 style={{ fontSize: '24px', fontWeight: 800, margin: '0 0 4px', color: '#0f172a' }}>
+                  Photo Management
+                </h1>
+                <p style={{ margin: 0, color: '#64748b', fontSize: '13px' }}>
+                  Browse, set covers, and manage high-resolution product photos.
+                </p>
+              </div>
+
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <input
+                  type="file"
+                  multiple
+                  ref={dedicatedPhotoPickerRef}
+                  accept="image/jpeg,image/png,image/webp"
+                  style={{ display: 'none' }}
+                  onChange={(e) => {
+                    const files = Array.from(e.target.files || []);
+                    if (!files.length) return;
+                    setPhotoUploadFiles(files);
+                    files.forEach((f) => {
+                      const r = new FileReader();
+                      r.onload = (ev) => {
+                        if (ev.target?.result) setPhotoUploadPreviews((prev) => [...prev, String(ev.target?.result)]);
+                      };
+                      r.readAsDataURL(f);
+                    });
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => dedicatedPhotoPickerRef.current?.click()}
+                  style={{
+                    background: '#15803d',
+                    color: '#ffffff',
+                    border: 'none',
+                    borderRadius: '8px',
+                    padding: '9px 16px',
+                    fontSize: '13px',
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                  }}
+                >
+                  📷 Upload Photos from Device
+                </button>
+              </div>
+            </div>
+
+            {/* If files selected for upload */}
+            {photoUploadFiles.length > 0 && (
+              <div
+                style={{
+                  background: '#ffffff',
+                  border: '2px dashed #16a34a',
+                  borderRadius: '12px',
+                  padding: '20px',
+                  marginBottom: '24px',
+                }}
+              >
+                <div style={{ fontWeight: 800, fontSize: '14px', marginBottom: '8px', color: '#166534' }}>
+                  Ready to upload {photoUploadFiles.length} photo(s):
+                </div>
+                <div style={{ marginBottom: '14px' }}>
+                  <label style={{ fontSize: '12px', fontWeight: 700, display: 'block', marginBottom: '4px' }}>
+                    Assign to product (optional):
+                  </label>
+                  <select
+                    value={photoTargetProduct}
+                    onChange={(e) => setPhotoTargetProduct(e.target.value)}
+                    style={{
+                      width: '100%',
+                      maxWidth: '360px',
+                      padding: '8px 12px',
+                      borderRadius: '6px',
+                      border: '1px solid #cbd5e1',
+                      fontSize: '13px',
+                    }}
+                  >
+                    <option value="">General catalogue image</option>
+                    {products.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name} ({p.id})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button
+                    type="button"
+                    disabled={photoUploading}
+                    onClick={handleDedicatedPhotoUpload}
+                    style={{
+                      background: '#16a34a',
+                      color: '#ffffff',
+                      border: 'none',
+                      borderRadius: '6px',
+                      padding: '8px 18px',
+                      fontSize: '13px',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {photoUploading ? 'Uploading...' : 'Confirm Upload'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPhotoUploadFiles([]);
+                      setPhotoUploadPreviews([]);
+                    }}
+                    style={{
+                      background: '#f1f5f9',
+                      border: '1px solid #cbd5e1',
+                      borderRadius: '6px',
+                      padding: '8px 14px',
+                      fontSize: '13px',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Photos Grid */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '14px' }}>
               {mediaList
-                .filter((m) => mediaFilter === 'all' || m.media_type === mediaFilter)
+                .filter((m) => m.media_type === 'image')
                 .map((m) => {
-                  const linkedProduct = products.find((p) => p.id === m.product_id);
+                  const parent = products.find((p) => p.id === m.product_id);
+                  const isCover = parent?.image_url === m.storage_path;
 
                   return (
                     <div
                       key={m.id}
                       style={{
                         background: '#ffffff',
-                        border: '1px solid #e7e2d8',
+                        border: isCover ? '2px solid #c9a24d' : '1px solid #e7e2d8',
                         borderRadius: '10px',
                         overflow: 'hidden',
                         display: 'flex',
                         flexDirection: 'column',
                       }}
                     >
-                      <div style={{ height: '140px', background: '#f8fafc', position: 'relative' }}>
-                        {m.media_type === 'video' ? (
-                          <video
-                            src={m.storage_path}
-                            controls
-                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                          />
-                        ) : (
-                          <img
-                            src={m.storage_path}
-                            alt={m.file_name || 'media'}
-                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                            onError={handleImageError}
-                          />
+                      <div style={{ position: 'relative', height: '160px', background: '#f8fafc' }}>
+                        <img
+                          src={m.storage_path}
+                          alt={m.file_name || 'product photo'}
+                          onError={handleImageError}
+                          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                        />
+                        {isCover && (
+                          <span
+                            style={{
+                              position: 'absolute',
+                              top: '6px',
+                              right: '6px',
+                              background: '#c9a24d',
+                              color: '#fff',
+                              fontSize: '10px',
+                              fontWeight: 800,
+                              padding: '2px 6px',
+                              borderRadius: '4px',
+                            }}
+                          >
+                            ★ COVER PHOTO
+                          </span>
                         )}
-                        <span
-                          style={{
-                            position: 'absolute',
-                            top: '6px',
-                            left: '6px',
-                            background: '#000a',
-                            color: '#fff',
-                            fontSize: '10px',
-                            fontWeight: 700,
-                            padding: '2px 6px',
-                            borderRadius: '4px',
-                          }}
-                        >
-                          {m.media_type === 'video' ? '🎥 Video' : '📷 Photo'}
-                        </span>
                       </div>
 
-                      <div style={{ padding: '10px', flex: 1, display: 'flex', flexDirection: 'column' }}>
-                        <div style={{ fontSize: '12px', fontWeight: 700, color: '#0f172a', wordBreak: 'break-all' }}>
-                          {m.file_name || m.id}
+                      <div style={{ padding: '10px', display: 'flex', flexDirection: 'column', flex: 1 }}>
+                        <div style={{ fontSize: '13px', fontWeight: 800, color: '#0f172a', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {parent?.name || m.product_name || m.product_id}
                         </div>
-                        {linkedProduct && (
-                          <div style={{ fontSize: '11px', color: '#0284c7', marginTop: '2px' }}>
-                            {linkedProduct.name}
-                          </div>
-                        )}
-                        <div style={{ marginTop: 'auto', paddingTop: '8px', display: 'flex', justifyContent: 'flex-end' }}>
+                        <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>
+                          ID: {m.product_id}
+                        </div>
+
+                        <div style={{ display: 'flex', gap: '6px', marginTop: 'auto', paddingTop: '8px' }}>
+                          {!isCover && (
+                            <button
+                              type="button"
+                              onClick={() => handleSetCoverPhoto(m)}
+                              style={{
+                                flex: 1,
+                                background: '#fef3c7',
+                                color: '#92400e',
+                                border: 'none',
+                                borderRadius: '4px',
+                                padding: '5px',
+                                fontSize: '10px',
+                                fontWeight: 700,
+                                cursor: 'pointer',
+                              }}
+                            >
+                              Set Cover
+                            </button>
+                          )}
                           <button
                             type="button"
-                            onClick={() => setMediaToDelete(m)}
+                            onClick={() => setPhotoToDelete(m)}
                             style={{
-                              background: 'none',
+                              background: '#fee2e2',
+                              color: '#991b1b',
                               border: 'none',
-                              color: '#dc2626',
-                              fontSize: '11px',
+                              borderRadius: '4px',
+                              padding: '5px 8px',
+                              fontSize: '10px',
                               fontWeight: 700,
                               cursor: 'pointer',
-                              padding: 0,
                             }}
                           >
                             Delete
@@ -2584,161 +2961,488 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         )}
 
         {/* ============================================================
-            8. SETTINGS & PASSWORD SECTION
+            7. CATEGORIES MANAGEMENT SECTION
             ============================================================ */}
-        {activeSection === 'settings' && (
-          <div style={{ maxWidth: '600px', margin: '0 auto' }}>
+        {activeSection === 'categories' && (
+          <div style={{ maxWidth: '820px', margin: '0 auto' }}>
             <h1 style={{ fontSize: '24px', fontWeight: 800, margin: '0 0 4px', color: '#0f172a' }}>
-              Admin Settings
+              Category Management
             </h1>
             <p style={{ margin: '0 0 20px', color: '#64748b', fontSize: '13px' }}>
-              Change your password and check database connection.
+              Organize products into collections. Categories are updated live on the storefront navigation.
             </p>
 
-            {/* Database status card */}
-            <div
+            {/* Add Category Card */}
+            <form
+              onSubmit={handleAddCategory}
               style={{
                 background: '#ffffff',
-                borderRadius: '12px',
                 border: '1px solid #e7e2d8',
-                padding: '20px',
-                marginBottom: '20px',
-                boxShadow: '0 2px 6px rgba(0,0,0,0.02)',
+                borderRadius: '12px',
+                padding: '18px 20px',
+                marginBottom: '24px',
+                display: 'flex',
+                gap: '10px',
+                alignItems: 'center',
               }}
             >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-                <span style={{ fontSize: '16px' }}>🟢</span>
-                <span style={{ fontWeight: 800, fontSize: '14px', color: '#16a34a' }}>
-                  Live Supabase Database Connected
-                </span>
-              </div>
-              <div style={{ fontSize: '13px', color: '#64748b', lineHeight: 1.5 }}>
-                Provider: {dbStatus?.provider || 'Supabase PostgreSQL'}<br />
-                Connected to: {dbStatus?.database || 'postgres'}<br />
-                Total synced items: {products.length} products, {categories.length} categories
-              </div>
-            </div>
+              <input
+                type="text"
+                required
+                placeholder="New Category Name (e.g. Diya Holders, Resin Clocks)..."
+                value={categoryInputName}
+                onChange={(e) => setCategoryInputName(e.target.value)}
+                style={{
+                  flex: 1,
+                  padding: '10px 14px',
+                  borderRadius: '8px',
+                  border: '1px solid #cbd5e1',
+                  fontSize: '14px',
+                }}
+              />
+              <button
+                type="submit"
+                style={{
+                  background: 'linear-gradient(135deg, #d8b45a 0%, #c9a24d 100%)',
+                  color: '#182235',
+                  border: 'none',
+                  borderRadius: '8px',
+                  padding: '10px 20px',
+                  fontSize: '13px',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                ＋ Add Category
+              </button>
+            </form>
 
-            {/* Password Form */}
-            <div
+            {/* Categories List */}
+            <div style={{ display: 'grid', gap: '10px' }}>
+              {categories.map((cat) => {
+                const count = products.filter((p) => p.category.toLowerCase() === cat.name.toLowerCase()).length;
+                const isEditing = editingCategoryId === cat.id;
+
+                return (
+                  <div
+                    key={cat.id}
+                    style={{
+                      background: '#ffffff',
+                      border: '1px solid #e7e2d8',
+                      borderRadius: '10px',
+                      padding: '14px 18px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: '12px',
+                    }}
+                  >
+                    {isEditing ? (
+                      <div style={{ display: 'flex', gap: '8px', flex: 1 }}>
+                        <input
+                          type="text"
+                          value={editingCategoryName}
+                          onChange={(e) => setEditingCategoryName(e.target.value)}
+                          style={{
+                            flex: 1,
+                            padding: '6px 10px',
+                            borderRadius: '6px',
+                            border: '1px solid #c9a24d',
+                            fontSize: '14px',
+                          }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleRenameCategory(cat)}
+                          style={{
+                            background: '#16a34a',
+                            color: '#fff',
+                            border: 'none',
+                            borderRadius: '6px',
+                            padding: '6px 12px',
+                            fontSize: '12px',
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          Save
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setEditingCategoryId(null)}
+                          style={{
+                            background: '#f1f5f9',
+                            border: '1px solid #cbd5e1',
+                            borderRadius: '6px',
+                            padding: '6px 10px',
+                            fontSize: '12px',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        <div>
+                          <strong style={{ fontSize: '15px', color: '#0f172a' }}>{cat.name}</strong>
+                          <span style={{ fontSize: '12px', color: '#64748b', marginLeft: '10px' }}>
+                            {count} products
+                          </span>
+                        </div>
+
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingCategoryId(cat.id);
+                              setEditingCategoryName(cat.name);
+                            }}
+                            style={{
+                              background: '#f8fafc',
+                              border: '1px solid #cbd5e1',
+                              borderRadius: '6px',
+                              padding: '6px 10px',
+                              fontSize: '12px',
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            Rename
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteCategory(cat)}
+                            style={{
+                              background: count > 0 ? '#f1f5f9' : '#fee2e2',
+                              color: count > 0 ? '#94a3b8' : '#991b1b',
+                              border: 'none',
+                              borderRadius: '6px',
+                              padding: '6px 10px',
+                              fontSize: '12px',
+                              fontWeight: 700,
+                              cursor: count > 0 ? 'not-allowed' : 'pointer',
+                            }}
+                            title={count > 0 ? 'Cannot delete category with products' : 'Delete category'}
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* ============================================================
+            8. SETTINGS & SECURITY SECTION
+            ============================================================ */}
+        {activeSection === 'settings' && (
+          <div style={{ maxWidth: '640px', margin: '0 auto' }}>
+            <h1 style={{ fontSize: '24px', fontWeight: 800, margin: '0 0 4px', color: '#0f172a' }}>
+              Admin Settings &amp; Security
+            </h1>
+            <p style={{ margin: '0 0 24px', color: '#64748b', fontSize: '13px' }}>
+              Manage password, security credentials, and brand details.
+            </p>
+
+            {/* Change Password Card */}
+            <form
+              onSubmit={handlePasswordSubmit}
               style={{
                 background: '#ffffff',
-                borderRadius: '14px',
                 border: '1px solid #e7e2d8',
+                borderRadius: '14px',
                 padding: '24px',
+                marginBottom: '24px',
                 boxShadow: '0 2px 10px rgba(0,0,0,0.03)',
               }}
             >
-              <h2 style={{ fontSize: '16px', fontWeight: 800, margin: '0 0 16px', color: '#0f172a' }}>
+              <h2 style={{ fontSize: '17px', fontWeight: 800, margin: '0 0 16px', color: '#0f172a' }}>
                 Change Admin Password
               </h2>
 
-              <form onSubmit={handlePasswordSubmit}>
-                <div style={{ marginBottom: '16px' }}>
-                  <label style={{ display: 'block', fontWeight: 700, fontSize: '13px', marginBottom: '6px' }}>
-                    Current Password
-                  </label>
-                  <input
-                    type={showPassword ? 'text' : 'password'}
-                    required
-                    value={passCurrent}
-                    onChange={(e) => setPassCurrent(e.target.value)}
-                    placeholder="Enter current password"
-                    style={{
-                      width: '100%',
-                      padding: '10px 12px',
-                      borderRadius: '6px',
-                      border: '1px solid #cbd5e1',
-                      fontSize: '14px',
-                      boxSizing: 'border-box',
-                    }}
-                  />
-                </div>
-
-                <div style={{ marginBottom: '16px' }}>
-                  <label style={{ display: 'block', fontWeight: 700, fontSize: '13px', marginBottom: '6px' }}>
-                    New Password
-                  </label>
-                  <input
-                    type={showPassword ? 'text' : 'password'}
-                    required
-                    minLength={8}
-                    value={passNew}
-                    onChange={(e) => setPassNew(e.target.value)}
-                    placeholder="Minimum 8 characters"
-                    style={{
-                      width: '100%',
-                      padding: '10px 12px',
-                      borderRadius: '6px',
-                      border: '1px solid #cbd5e1',
-                      fontSize: '14px',
-                      boxSizing: 'border-box',
-                    }}
-                  />
-                </div>
-
-                <div style={{ marginBottom: '16px' }}>
-                  <label style={{ display: 'block', fontWeight: 700, fontSize: '13px', marginBottom: '6px' }}>
-                    Confirm New Password
-                  </label>
-                  <input
-                    type={showPassword ? 'text' : 'password'}
-                    required
-                    minLength={8}
-                    value={passConfirm}
-                    onChange={(e) => setPassConfirm(e.target.value)}
-                    placeholder="Re-type new password"
-                    style={{
-                      width: '100%',
-                      padding: '10px 12px',
-                      borderRadius: '6px',
-                      border: '1px solid #cbd5e1',
-                      fontSize: '14px',
-                      boxSizing: 'border-box',
-                    }}
-                  />
-                </div>
-
-                <div style={{ marginBottom: '20px' }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', cursor: 'pointer', color: '#64748b' }}>
-                    <input
-                      type="checkbox"
-                      checked={showPassword}
-                      onChange={(e) => setShowPassword(e.target.checked)}
-                    />
-                    Show password characters
-                  </label>
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={passLoading}
+              <div style={{ marginBottom: '14px' }}>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, marginBottom: '6px' }}>
+                  Current Password
+                </label>
+                <input
+                  type="password"
+                  required
+                  value={passCurrent}
+                  onChange={(e) => setPassCurrent(e.target.value)}
                   style={{
-                    background: passLoading ? '#94a3b8' : '#182235',
-                    color: '#ffffff',
-                    border: 'none',
-                    borderRadius: '6px',
-                    padding: '11px 20px',
+                    width: '100%',
+                    padding: '10px 12px',
+                    borderRadius: '8px',
+                    border: '1px solid #cbd5e1',
                     fontSize: '14px',
-                    fontWeight: 800,
-                    cursor: passLoading ? 'not-allowed' : 'pointer',
+                    boxSizing: 'border-box',
                   }}
-                >
-                  {passLoading ? 'Updating password...' : 'Update Password'}
-                </button>
-              </form>
-            </div>
+                />
+              </div>
+
+              <div style={{ marginBottom: '14px' }}>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, marginBottom: '6px' }}>
+                  New Password (min 8 characters)
+                </label>
+                <input
+                  type="password"
+                  required
+                  value={passNew}
+                  onChange={(e) => setPassNew(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '10px 12px',
+                    borderRadius: '8px',
+                    border: '1px solid #cbd5e1',
+                    fontSize: '14px',
+                    boxSizing: 'border-box',
+                  }}
+                />
+              </div>
+
+              <div style={{ marginBottom: '20px' }}>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, marginBottom: '6px' }}>
+                  Confirm New Password
+                </label>
+                <input
+                  type="password"
+                  required
+                  value={passConfirm}
+                  onChange={(e) => setPassConfirm(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '10px 12px',
+                    borderRadius: '8px',
+                    border: '1px solid #cbd5e1',
+                    fontSize: '14px',
+                    boxSizing: 'border-box',
+                  }}
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={passLoading}
+                style={{
+                  background: 'linear-gradient(135deg, #182235 0%, #2a3952 100%)',
+                  color: '#ffffff',
+                  border: 'none',
+                  borderRadius: '8px',
+                  padding: '10px 20px',
+                  fontSize: '13px',
+                  fontWeight: 800,
+                  cursor: passLoading ? 'not-allowed' : 'pointer',
+                }}
+              >
+                {passLoading ? 'Updating Password...' : 'Update Password'}
+              </button>
+            </form>
           </div>
         )}
       </main>
 
-      {/* CONFIRM DELETE PRODUCT MODAL */}
+      {/* ============================================================
+          MODALS: QUICK DETAILS, VIDEO PLAYER, CONFIRMATION
+          ============================================================ */}
+
+      {/* 1. PRODUCT DETAILS QUICK VIEW MODAL */}
+      {viewDetailsItem && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.65)',
+            zIndex: 100,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '16px',
+          }}
+          onClick={() => setViewDetailsItem(null)}
+        >
+          <div
+            style={{
+              background: '#ffffff',
+              borderRadius: '14px',
+              maxWidth: '680px',
+              width: '100%',
+              maxHeight: '90vh',
+              overflowY: 'auto',
+              padding: '24px',
+              position: 'relative',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              onClick={() => setViewDetailsItem(null)}
+              style={{
+                position: 'absolute',
+                top: '16px',
+                right: '16px',
+                border: 'none',
+                background: '#f1f5f9',
+                borderRadius: '50%',
+                width: '32px',
+                height: '32px',
+                cursor: 'pointer',
+                fontSize: '16px',
+              }}
+            >
+              ✕
+            </button>
+
+            <h2 style={{ fontSize: '20px', fontWeight: 800, margin: '0 0 16px', color: '#0f172a' }}>
+              Product Details: {viewDetailsItem.name}
+            </h2>
+
+            <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', marginBottom: '16px' }}>
+              <img
+                src={viewDetailsItem.image_url || '/logo.png'}
+                alt={viewDetailsItem.name}
+                onError={handleImageError}
+                style={{ width: '120px', height: '120px', objectFit: 'cover', borderRadius: '8px', border: '1px solid #cbd5e1' }}
+              />
+
+              <div style={{ flex: 1, minWidth: '220px', fontSize: '13px', lineHeight: 1.6 }}>
+                <div><strong>Product ID:</strong> {viewDetailsItem.id}</div>
+                <div><strong>Category:</strong> {viewDetailsItem.category || 'Not provided'}</div>
+                <div><strong>Status:</strong> {viewDetailsItem.published !== false ? 'Published' : 'Draft'}</div>
+                <div><strong>Availability:</strong> {viewDetailsItem.availability || 'In Stock'}</div>
+                <div><strong>Created:</strong> {viewDetailsItem.created_at ? new Date(viewDetailsItem.created_at).toLocaleString() : 'Not provided'}</div>
+                <div><strong>Updated:</strong> {viewDetailsItem.updated_at ? new Date(viewDetailsItem.updated_at).toLocaleString() : 'Not provided'}</div>
+              </div>
+            </div>
+
+            <div style={{ marginBottom: '16px' }}>
+              <div style={{ fontSize: '12px', fontWeight: 700, color: '#64748b' }}>Description:</div>
+              <p style={{ margin: '4px 0 0', fontSize: '13px', color: '#1e293b', lineHeight: 1.5 }}>
+                {viewDetailsItem.description || 'Not provided'}
+              </p>
+            </div>
+
+            {viewDetailsItem.video_url && (
+              <div style={{ marginBottom: '16px' }}>
+                <div style={{ fontSize: '12px', fontWeight: 700, color: '#64748b', marginBottom: '6px' }}>
+                  Attached Demonstration Video:
+                </div>
+                <video
+                  controls
+                  src={viewDetailsItem.video_url}
+                  style={{ width: '100%', maxHeight: '240px', borderRadius: '8px', background: '#000' }}
+                />
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', marginTop: '20px' }}>
+              <button
+                type="button"
+                onClick={() => {
+                  const itm = viewDetailsItem;
+                  setViewDetailsItem(null);
+                  handleOpenEditProduct(itm);
+                }}
+                style={{
+                  background: '#182235',
+                  color: '#ffffff',
+                  border: 'none',
+                  borderRadius: '6px',
+                  padding: '8px 16px',
+                  fontSize: '13px',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}
+              >
+                ✏️ Edit Product
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewDetailsItem(null)}
+                style={{
+                  background: '#f1f5f9',
+                  border: '1px solid #cbd5e1',
+                  borderRadius: '6px',
+                  padding: '8px 16px',
+                  fontSize: '13px',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 2. PLAY VIDEO MODAL */}
+      {playingVideo && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.85)',
+            zIndex: 100,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '16px',
+          }}
+          onClick={() => setPlayingVideo(null)}
+        >
+          <div
+            style={{
+              background: '#090d16',
+              borderRadius: '14px',
+              maxWidth: '720px',
+              width: '100%',
+              overflow: 'hidden',
+              position: 'relative',
+              boxShadow: '0 20px 40px rgba(0,0,0,0.5)',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 18px', background: '#111827', color: '#fff' }}>
+              <strong style={{ fontSize: '15px' }}>{playingVideo.title}</strong>
+              <button
+                type="button"
+                onClick={() => setPlayingVideo(null)}
+                style={{
+                  background: 'transparent',
+                  color: '#fff',
+                  border: 'none',
+                  fontSize: '18px',
+                  cursor: 'pointer',
+                }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <video
+              src={playingVideo.url}
+              controls
+              autoPlay
+              playsInline
+              style={{ width: '100%', maxHeight: '480px', display: 'block' }}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* 3. CONFIRM DELETE PRODUCT MODAL */}
       {productToDelete && (
         <div
           style={{
             position: 'fixed',
             inset: 0,
-            background: 'rgba(0,0,0,0.5)',
+            background: 'rgba(0,0,0,0.65)',
             zIndex: 100,
             display: 'flex',
             alignItems: 'center',
@@ -2751,21 +3455,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             style={{
               background: '#ffffff',
               borderRadius: '14px',
-              padding: '24px',
-              maxWidth: '440px',
+              maxWidth: '460px',
               width: '100%',
-              boxShadow: '0 20px 40px rgba(0,0,0,0.2)',
+              padding: '24px',
+              position: 'relative',
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div style={{ fontSize: '32px', marginBottom: '8px' }}>⚠️</div>
-            <h3 style={{ fontSize: '18px', fontWeight: 800, margin: '0 0 6px', color: '#0f172a' }}>
-              Delete "{productToDelete.name}"?
+            <h3 style={{ fontSize: '18px', fontWeight: 800, margin: '0 0 10px', color: '#991b1b' }}>
+              Delete Product
             </h3>
-            <p style={{ fontSize: '13px', color: '#64748b', lineHeight: 1.5, margin: '0 0 20px' }}>
-              Are you sure you want to permanently remove this product from your website? This action cannot be undone.
+            <p style={{ fontSize: '14px', color: '#475569', lineHeight: 1.5, margin: '0 0 20px' }}>
+              Are you sure you want to delete <strong>"{productToDelete.name}"</strong> (ID: {productToDelete.id})? This will permanently remove the item from the storefront.
             </p>
-            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
               <button
                 type="button"
                 onClick={() => setProductToDelete(null)}
@@ -2802,47 +3506,50 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </div>
       )}
 
-      {/* CONFIRM DELETE MEDIA MODAL */}
-      {mediaToDelete && (
+      {/* 4. CONFIRM DELETE VIDEO MODAL (KEEPS PRODUCT INTACT) */}
+      {videoToDelete && (
         <div
           style={{
             position: 'fixed',
             inset: 0,
-            background: 'rgba(0,0,0,0.5)',
+            background: 'rgba(0,0,0,0.65)',
             zIndex: 100,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             padding: '16px',
           }}
-          onClick={() => setMediaToDelete(null)}
+          onClick={() => setVideoToDelete(null)}
         >
           <div
             style={{
               background: '#ffffff',
               borderRadius: '14px',
-              padding: '24px',
-              maxWidth: '400px',
+              maxWidth: '460px',
               width: '100%',
-              boxShadow: '0 20px 40px rgba(0,0,0,0.2)',
+              padding: '24px',
+              position: 'relative',
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 style={{ fontSize: '17px', fontWeight: 800, margin: '0 0 6px', color: '#0f172a' }}>
-              Delete media item?
+            <h3 style={{ fontSize: '18px', fontWeight: 800, margin: '0 0 10px', color: '#991b1b' }}>
+              Delete Video
             </h3>
-            <p style={{ fontSize: '13px', color: '#64748b', margin: '0 0 20px' }}>
-              Are you sure you want to delete this file?
+            <p style={{ fontSize: '14px', color: '#475569', lineHeight: 1.5, margin: '0 0 20px' }}>
+              Are you sure you want to delete the video demonstration for <strong>"{videoToDelete.title}"</strong>?
+              <br /><br />
+              <strong style={{ color: '#15803d' }}>Note:</strong> This only removes the video file. The product and its photos will remain completely intact.
             </p>
-            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
               <button
                 type="button"
-                onClick={() => setMediaToDelete(null)}
+                onClick={() => setVideoToDelete(null)}
                 style={{
                   background: '#f1f5f9',
                   border: '1px solid #cbd5e1',
                   borderRadius: '6px',
-                  padding: '8px 14px',
+                  padding: '9px 16px',
                   fontSize: '13px',
                   fontWeight: 700,
                   cursor: 'pointer',
@@ -2852,26 +3559,96 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </button>
               <button
                 type="button"
-                onClick={handleConfirmDeleteMedia}
+                onClick={handleConfirmDeleteVideo}
                 style={{
                   background: '#dc2626',
                   color: '#ffffff',
                   border: 'none',
                   borderRadius: '6px',
-                  padding: '8px 14px',
+                  padding: '9px 16px',
                   fontSize: '13px',
                   fontWeight: 800,
                   cursor: 'pointer',
                 }}
               >
-                Delete
+                Yes, Delete Video
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* TOAST FEEDBACK NOTIFICATION */}
+      {/* 5. CONFIRM DELETE PHOTO MODAL */}
+      {photoToDelete && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.65)',
+            zIndex: 100,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '16px',
+          }}
+          onClick={() => setPhotoToDelete(null)}
+        >
+          <div
+            style={{
+              background: '#ffffff',
+              borderRadius: '14px',
+              maxWidth: '460px',
+              width: '100%',
+              padding: '24px',
+              position: 'relative',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 style={{ fontSize: '18px', fontWeight: 800, margin: '0 0 10px', color: '#991b1b' }}>
+              Delete Photo
+            </h3>
+            <p style={{ fontSize: '14px', color: '#475569', lineHeight: 1.5, margin: '0 0 20px' }}>
+              Are you sure you want to delete this photo record?
+            </p>
+
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                onClick={() => setPhotoToDelete(null)}
+                style={{
+                  background: '#f1f5f9',
+                  border: '1px solid #cbd5e1',
+                  borderRadius: '6px',
+                  padding: '9px 16px',
+                  fontSize: '13px',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeletePhoto}
+                style={{
+                  background: '#dc2626',
+                  color: '#ffffff',
+                  border: 'none',
+                  borderRadius: '6px',
+                  padding: '9px 16px',
+                  fontSize: '13px',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                }}
+              >
+                Yes, Delete Photo
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TOAST NOTIFICATION */}
       {toastMessage && (
         <div
           style={{
@@ -2881,23 +3658,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             transform: 'translateX(-50%)',
             background: '#182235',
             color: '#ffffff',
-            padding: '12px 20px',
+            padding: '12px 22px',
             borderRadius: '8px',
-            fontSize: '13px',
-            fontWeight: 700,
-            boxShadow: '0 10px 25px rgba(0,0,0,0.25)',
+            fontSize: '14px',
+            fontWeight: 600,
+            boxShadow: '0 8px 24px rgba(0,0,0,0.25)',
             zIndex: 200,
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
           }}
         >
-          <span>✨</span>
-          <span>{toastMessage}</span>
+          {toastMessage}
         </div>
       )}
     </div>
   );
 };
-
-export default AdminDashboard;

@@ -271,8 +271,10 @@ export interface DatabaseStatus {
   user: string;
   counts?: {
     store_items: number;
+    published_products?: number;
     categories: number;
     product_media: number;
+    total_photos?: number;
     products_with_videos: number;
   };
   timestamp?: string;
@@ -293,7 +295,7 @@ export async function fetchDatabaseStatus(): Promise<DatabaseStatus> {
     host: 'aws-0-ap-southeast-2.pooler.supabase.com',
     port: 6543,
     database: 'postgres',
-    user: 'postgres.ujqxvpweokyqtharkqin',
+    user: 'postgres.kfkwudvnkhwooawbjkgb',
   };
 }
 
@@ -964,6 +966,26 @@ export async function deleteMediaItem(mediaId: string): Promise<boolean> {
   } catch (e) {}
 
   await logActivity('Media Deleted', 'media', mediaId, `Deleted media item "${item?.file_name || mediaId}"`);
+  return true;
+}
+
+export async function deleteProductVideoOnly(productId: string, mediaId?: string): Promise<boolean> {
+  if (mediaId) {
+    try {
+      await deleteMediaItem(mediaId);
+    } catch (e) {
+      console.warn('Could not delete media item record:', e);
+    }
+  }
+
+  const products = await fetchProducts();
+  const target = products.find((p) => p.id === productId);
+  if (target) {
+    target.video_url = '';
+    await saveProduct(target);
+  }
+
+  await logActivity('Video Removed', 'media', mediaId || productId, `Video removed from product ${productId}`);
   return true;
 }
 
