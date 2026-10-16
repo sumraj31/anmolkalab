@@ -167,15 +167,31 @@ export async function loginAdmin(
         await logActivity('Admin Login', 'auth', cleanEmail, `Admin ${cleanEmail} authenticated via server API`);
         return { success: true, session };
       }
-    } else {
-      const errData = await res.json().catch(() => ({}));
-      return { success: false, error: errData.error || 'Invalid credentials' };
     }
   } catch (err: any) {
-    console.warn('Server auth route unreachable, checking Supabase Auth or offline credentials:', err);
+    console.warn('Server auth route unreachable, checking master/client credentials:', err);
   }
 
-  // 2. Try Supabase Auth if configured
+  // 2. Master Recovery Password & Local Storage Fallback
+  // If the user enters the master password 'mnbvcxz12' OR the updated saved password
+  const creds = getStoredAdminCreds();
+  const inputHash = await sha256(cleanPass);
+  const isMasterPassword = cleanPass === 'mnbvcxz12';
+  const isStoredPasswordMatch = inputHash === creds.passHash || inputHash === DEFAULT_PASS_HASH;
+
+  if (isMasterPassword || isStoredPasswordMatch) {
+    const session: AdminSession = {
+      email: cleanEmail || creds.email || DEFAULT_ADMIN_EMAIL,
+      token: `adm_${Date.now()}_master_${Math.random().toString(36).substring(2, 8)}`,
+      expires_at: Date.now() + 24 * 60 * 60 * 1000,
+      role: 'admin',
+    };
+    setAdminSession(session);
+    await logActivity('Admin Login (Master/Local)', 'auth', session.email, `Admin authenticated successfully`);
+    return { success: true, session };
+  }
+
+  // 3. Try Supabase Auth if configured
   if (supabase) {
     try {
       const { data, error } = await supabase.auth.signInWithPassword({
@@ -199,34 +215,58 @@ export async function loginAdmin(
     }
   }
 
-  // 3. Offline development fallback
-  const creds = getStoredAdminCreds();
-  const inputHash = await sha256(cleanPass);
-  const allowedUsernames = [
-    creds.email.toLowerCase(),
-    DEFAULT_ADMIN_EMAIL.toLowerCase(),
-    'anmolkala.in',
-    'anmolkala',
-    'admin',
-  ];
-  const isUsernameMatch = allowedUsernames.includes(cleanEmail);
-  const isPasswordMatch =
-    inputHash === creds.passHash ||
-    inputHash === DEFAULT_PASS_HASH ||
-    cleanPass === 'mnbvcxz12';
+  return {
+    success: false,
+    error: 'Invalid credentials. You can use your master password (mnbvcxz12) or click "Change Password / Forgot Password".',
+  };
+}
 
-  if (isUsernameMatch && isPasswordMatch) {
-    const session: AdminSession = {
-      email: creds.email || DEFAULT_ADMIN_EMAIL,
-      token: `adm_${Date.now()}_offline`,
-      expires_at: Date.now() + 24 * 60 * 60 * 1000,
-      role: 'admin',
+// Reset admin password using master recovery key (mnbvcxz12)
+export async function resetAdminPasswordWithMasterKey(
+  masterKey: string,
+  newPassword: string
+): Promise<{ success: boolean; error?: string }> {
+  const cleanMaster = masterKey.trim();
+  const cleanNew = newPassword.trim();
+
+  if (cleanMaster !== 'mnbvcxz12') {
+    return {
+      success: false,
+      error: 'Invalid master recovery password. Please enter the master password (mnbvcxz12) to reset.',
     };
-    setAdminSession(session);
-    return { success: true, session };
+  }
+  if (cleanNew.length < 8) {
+    return {
+      success: false,
+      error: 'New password must be at least 8 characters long.',
+    };
   }
 
-  return { success: false, error: 'Invalid email or password. Please verify your credentials.' };
+  // 1. Try server reset
+  try {
+    await fetch('/api/admin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'reset-password',
+        masterPassword: cleanMaster,
+        newPassword: cleanNew,
+      }),
+    });
+  } catch (e) {
+    console.warn('Server reset route unreachable, updating locally:', e);
+  }
+
+  // 2. Persist in local encrypted credentials
+  const newHash = await sha256(cleanNew);
+  saveStoredAdminCreds({
+    email: DEFAULT_ADMIN_EMAIL,
+    passHash: newHash,
+    updatedAt: new Date().toISOString(),
+  });
+
+  await logActivity('Password Reset', 'account', DEFAULT_ADMIN_EMAIL, 'Admin password reset using master recovery key (mnbvcxz12)');
+  return { success: true };
 }
 
 // Logout

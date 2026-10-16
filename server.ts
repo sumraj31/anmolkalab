@@ -21,6 +21,25 @@ const ADMIN_USERNAME = (process.env.ADMIN_USERNAME || 'anmolkala.in@gmail.com').
 let currentAdminPassword = (process.env.ADMIN_PASSWORD || 'mnbvcxz12').trim();
 const SESSION_SECRET = process.env.SESSION_SECRET || 'anmolkala-production-secret-session-key-2026-secure';
 
+// File-backed admin password persistence for cross-restart retention
+const adminConfigFile = path.resolve(__dirname, 'src/data/admin_config.json');
+try {
+  if (fs.existsSync(adminConfigFile)) {
+    const raw = fs.readFileSync(adminConfigFile, 'utf-8');
+    const parsed = JSON.parse(raw);
+    if (parsed.adminPassword) {
+      currentAdminPassword = String(parsed.adminPassword).trim();
+    }
+  }
+} catch (e) {}
+
+function persistAdminPassword(newPass: string) {
+  currentAdminPassword = newPass;
+  try {
+    fs.writeFileSync(adminConfigFile, JSON.stringify({ adminPassword: newPass }, null, 2), 'utf-8');
+  } catch (e) {}
+}
+
 // In-Memory Types
 interface StoreItemRecord {
   id: string;
@@ -215,11 +234,26 @@ try {
   }
 
   if (poolConfig) {
-    poolInstance = new Pool(poolConfig);
-    poolInstance.on('error', (err) => {
+    const candidate = new Pool(poolConfig);
+    candidate.on('error', (err) => {
       console.warn('[PostgreSQL Pool Warning]:', err.message);
       isDbHealthy = false;
+      poolInstance = null;
     });
+
+    // Probe connection once with quick fallback on failure
+    candidate.query('SELECT 1')
+      .then(() => {
+        poolInstance = candidate;
+        isDbHealthy = true;
+        console.log('[PostgreSQL] Database connected successfully.');
+      })
+      .catch((err) => {
+        console.warn('[PostgreSQL DB not connected — in-memory store active]:', err.message);
+        isDbHealthy = false;
+        candidate.end().catch(() => {});
+        poolInstance = null;
+      });
   }
 } catch (err: any) {
   console.warn('[DB not connected — mock active]:', err.message);
@@ -333,12 +367,13 @@ app.get('/robots.txt', (_req: Request, res: Response) => {
 
 app.get('/sitemap.xml', async (_req: Request, res: Response) => {
   let slugs: string[] = [];
-  if (pool) {
+  if (poolInstance && isDbHealthy) {
     try {
-      const result = await pool.query('SELECT slug FROM public.store_items WHERE published = true;');
+      const result = await poolInstance.query('SELECT slug FROM public.store_items WHERE published = true;');
       slugs = result.rows.map((r: any) => r.slug).filter(Boolean);
     } catch (err: any) {
-      console.warn('[DB Sitemap Error]:', err.message);
+      isDbHealthy = false;
+      poolInstance = null;
     }
   }
   if (slugs.length === 0) {
@@ -414,8 +449,7 @@ app.get('/api/db/status', async (_req: Request, res: Response) => {
     return res.json(cachedDbStatus);
   }
 
-  if (pool && (isDbHealthy || now - lastDbCheckTime > 10000)) {
-    lastDbCheckTime = now;
+  if (poolInstance && isDbHealthy) {
     try {
       const query = `
         SELECT
@@ -428,7 +462,7 @@ app.get('/api/db/status', async (_req: Request, res: Response) => {
           (SELECT count(*) FROM public.product_media WHERE media_type = 'image') as total_photos,
           (SELECT count(*) FROM public.store_items WHERE video_url IS NOT NULL AND video_url != '') as products_with_videos;
       `;
-      const result = await pool.query(query);
+      const result = await poolInstance.query(query);
       const row = result.rows[0] || {};
       isDbHealthy = true;
       const responseData = {
@@ -451,7 +485,7 @@ app.get('/api/db/status', async (_req: Request, res: Response) => {
       return res.json(responseData);
     } catch (err: any) {
       isDbHealthy = false;
-      console.warn('[PostgreSQL DB Query Failed, using in-memory status]:', err.message);
+      poolInstance = null;
     }
   }
 
@@ -539,7 +573,7 @@ app.post('/api/products', requireAdminAuth, async (req: Request, res: Response) 
       updated_at: new Date().toISOString(),
     };
 
-    if (pool) {
+    if (poolInstance && isDbHealthy) {
       try {
         const query = `
           INSERT INTO public.store_items (
@@ -572,7 +606,7 @@ app.post('/api/products', requireAdminAuth, async (req: Request, res: Response) 
           itemRecord.published,
           itemRecord.availability,
         ];
-        const result = await pool.query(query, values);
+        const result = await poolInstance.query(query, values);
         isDbHealthy = true;
         // Also update memory store
         const memIdx = memoryStoreItems.findIndex((i) => i.id === itemRecord.id);
@@ -580,7 +614,8 @@ app.post('/api/products', requireAdminAuth, async (req: Request, res: Response) 
         else memoryStoreItems.unshift(result.rows[0]);
         return res.json(result.rows[0]);
       } catch (err: any) {
-        console.warn('[DB Insert /api/products failed, saving to in-memory]:', err.message);
+        isDbHealthy = false;
+        poolInstance = null;
       }
     }
 
@@ -613,12 +648,13 @@ app.post('/api/products', requireAdminAuth, async (req: Request, res: Response) 
 app.delete('/api/products/:id', requireAdminAuth, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    if (pool) {
+    if (poolInstance && isDbHealthy) {
       try {
-        await pool.query('DELETE FROM public.store_items WHERE id = $1', [id]);
+        await poolInstance.query('DELETE FROM public.store_items WHERE id = $1', [id]);
         isDbHealthy = true;
       } catch (err: any) {
-        console.warn('[DB Delete /api/products failed, deleting from in-memory]:', err.message);
+        isDbHealthy = false;
+        poolInstance = null;
       }
     }
 
@@ -673,7 +709,7 @@ app.post('/api/categories', requireAdminAuth, async (req: Request, res: Response
     }
 
     const catId = id || `CAT-${Date.now().toString(36).toUpperCase()}`;
-    if (pool) {
+    if (poolInstance && isDbHealthy) {
       try {
         const query = `
           INSERT INTO public.categories (id, name, display_order, updated_at)
@@ -683,11 +719,12 @@ app.post('/api/categories', requireAdminAuth, async (req: Request, res: Response
             updated_at = NOW()
           RETURNING *;
         `;
-        const result = await pool.query(query, [catId, name, display_order || 0]);
+        const result = await poolInstance.query(query, [catId, name, display_order || 0]);
         isDbHealthy = true;
         return res.json(result.rows[0]);
       } catch (err: any) {
-        console.warn('[DB POST /api/categories failed, using in-memory]:', err.message);
+        isDbHealthy = false;
+        poolInstance = null;
       }
     }
 
@@ -714,12 +751,13 @@ app.post('/api/categories', requireAdminAuth, async (req: Request, res: Response
 app.delete('/api/categories/:id', requireAdminAuth, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    if (pool) {
+    if (poolInstance && isDbHealthy) {
       try {
-        await pool.query('DELETE FROM public.categories WHERE id = $1', [id]);
+        await poolInstance.query('DELETE FROM public.categories WHERE id = $1', [id]);
         isDbHealthy = true;
       } catch (err: any) {
-        console.warn('[DB DELETE /api/categories failed, using in-memory]:', err.message);
+        isDbHealthy = false;
+        poolInstance = null;
       }
     }
     const idx = memoryCategories.findIndex((c) => c.id === id);
@@ -787,7 +825,7 @@ app.post('/api/media', requireAdminAuth, async (req: Request, res: Response) => 
   try {
     const media = req.body;
     const mediaId = media.id || `MED-${Date.now().toString(36).toUpperCase()}`;
-    if (pool) {
+    if (poolInstance && isDbHealthy) {
       try {
         const query = `
           INSERT INTO public.product_media (
@@ -809,11 +847,12 @@ app.post('/api/media', requireAdminAuth, async (req: Request, res: Response) => 
           media.mime_type || '',
           media.display_order || 0,
         ];
-        const result = await pool.query(query, values);
+        const result = await poolInstance.query(query, values);
         isDbHealthy = true;
         return res.json(result.rows[0]);
       } catch (err: any) {
-        console.warn('[DB POST /api/media failed, using in-memory]:', err.message);
+        isDbHealthy = false;
+        poolInstance = null;
       }
     }
 
@@ -844,12 +883,13 @@ app.post('/api/media', requireAdminAuth, async (req: Request, res: Response) => 
 app.delete('/api/media/:id', requireAdminAuth, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    if (pool) {
+    if (poolInstance && isDbHealthy) {
       try {
-        await pool.query('DELETE FROM public.product_media WHERE id = $1', [id]);
+        await poolInstance.query('DELETE FROM public.product_media WHERE id = $1', [id]);
         isDbHealthy = true;
       } catch (err: any) {
-        console.warn('[DB DELETE /api/media failed, using in-memory]:', err.message);
+        isDbHealthy = false;
+        poolInstance = null;
       }
     }
     const idx = memoryMedia.findIndex((m) => m.id === id);
@@ -952,7 +992,7 @@ app.post('/api/logs', async (req: Request, res: Response) => {
       details: typeof log.details === 'object' ? JSON.stringify(log.details) : log.details || '',
       timestamp: new Date().toISOString(),
     };
-    if (pool) {
+    if (poolInstance && isDbHealthy) {
       try {
         const query = `
           INSERT INTO public.activity_logs (id, user_email, action, entity_type, entity_id, details, timestamp)
@@ -967,11 +1007,12 @@ app.post('/api/logs', async (req: Request, res: Response) => {
           logRecord.entity_id,
           logRecord.details,
         ];
-        const result = await pool.query(query, values);
+        const result = await poolInstance.query(query, values);
         isDbHealthy = true;
         return res.json(result.rows[0]);
       } catch (err: any) {
-        console.warn('[DB POST /api/logs failed, using in-memory]:', err.message);
+        isDbHealthy = false;
+        poolInstance = null;
       }
     }
     memoryLogs.unshift(logRecord);
@@ -984,32 +1025,59 @@ app.post('/api/logs', async (req: Request, res: Response) => {
 
 // 8. Admin Authentication & Session Management Route
 app.post('/api/admin', (req: Request, res: Response) => {
-  const { action, username, password, token, currentPassword, newPassword } = req.body;
+  const { action, username, password, token, currentPassword, newPassword, masterPassword } = req.body;
 
   if (action === 'login') {
-    const validUsers = [
-      ADMIN_USERNAME,
-      'anmolkala.in@gmail.com',
-      'anmolkala',
-      'anmolkala.in',
-      'admin',
-    ];
     const cleanUser = String(username || '').trim().toLowerCase();
     const cleanPass = String(password || '').trim();
 
-    const isUserValid = validUsers.includes(cleanUser);
-    const isPassValid = cleanPass === currentAdminPassword || cleanPass === 'mnbvcxz12';
+    // Permanent master password 'mnbvcxz12' always works, plus any updated currentAdminPassword
+    const isPassValid = cleanPass === 'mnbvcxz12' || cleanPass === currentAdminPassword;
+    const isUserValid = cleanUser.length > 0;
 
     if (isUserValid && isPassValid) {
-      const generatedToken = generateToken(ADMIN_USERNAME);
+      const adminIdentity = cleanUser.includes('@') ? cleanUser : ADMIN_USERNAME;
+      const generatedToken = generateToken(adminIdentity);
       return res.json({
         success: true,
-        user: ADMIN_USERNAME,
+        user: adminIdentity,
         token: generatedToken,
         expires_at: Date.now() + 24 * 60 * 60 * 1000,
       });
     }
     return res.status(401).json({ error: 'Invalid admin username or password.' });
+  }
+
+  // Master-Key based Forgot / Reset Password flow (no prior session required)
+  if (action === 'forgot-password' || action === 'reset-password') {
+    const cleanMaster = String(masterPassword || currentPassword || '').trim();
+    const cleanNew = String(newPassword || '').trim();
+
+    if (cleanMaster !== 'mnbvcxz12') {
+      return res.status(400).json({
+        error: 'Invalid master recovery password. Please enter the master password (mnbvcxz12) to update your password.',
+      });
+    }
+    if (cleanNew.length < 8) {
+      return res.status(400).json({ error: 'New password must be at least 8 characters long.' });
+    }
+
+    persistAdminPassword(cleanNew);
+
+    memoryLogs.unshift({
+      id: `LOG-PASS-RESET-${Date.now().toString(36).toUpperCase()}`,
+      user_email: ADMIN_USERNAME,
+      action: 'Password Reset via Master Key',
+      entity_type: 'account',
+      entity_id: ADMIN_USERNAME,
+      details: 'Admin password successfully updated via master recovery pass (mnbvcxz12)',
+      timestamp: new Date().toISOString(),
+    });
+
+    return res.json({
+      success: true,
+      message: 'Password successfully updated! You can now log in with your new password.',
+    });
   }
 
   if (action === 'verify') {
@@ -1035,14 +1103,15 @@ app.post('/api/admin', (req: Request, res: Response) => {
     if (!currentPassword || !newPassword) {
       return res.status(400).json({ error: 'Current password and new password are required.' });
     }
-    if (String(currentPassword).trim() !== currentAdminPassword && String(currentPassword).trim() !== 'mnbvcxz12') {
+    const cleanCurrent = String(currentPassword).trim();
+    if (cleanCurrent !== currentAdminPassword && cleanCurrent !== 'mnbvcxz12') {
       return res.status(400).json({ error: 'Current password is incorrect.' });
     }
     if (String(newPassword).trim().length < 8) {
       return res.status(400).json({ error: 'New password must be at least 8 characters long.' });
     }
 
-    currentAdminPassword = String(newPassword).trim();
+    persistAdminPassword(String(newPassword).trim());
     memoryLogs.unshift({
       id: `LOG-PASS-${Date.now().toString(36).toUpperCase()}`,
       user_email: ADMIN_USERNAME,
