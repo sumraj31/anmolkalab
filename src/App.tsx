@@ -24,7 +24,7 @@ const STORAGE_KEYS = {
   SAVED: 'ak_s',
   COMPARE: 'ak_c',
   RECENT: 'ak_r',
-  CUSTOM_ITEMS: 'ak_custom_store_items',
+  CUSTOM_ITEMS: 'anmolkala_store_items',
 };
 
 const ITEMS_PER_PAGE = 10;
@@ -125,11 +125,28 @@ export const App: React.FC = () => {
     saveStorage(STORAGE_KEYS.CUSTOM_ITEMS, customItems);
   }, [customItems]);
 
-  // Combine default products with custom admin products
-  const allProducts = useMemo(() => {
-    const customProducts: Product[] = customItems
-      .filter((item) => item.type === 'product' && item.published)
-      .map((item) => ({
+  // Authoritative catalogue: customItems from database/API takes complete precedence
+  const allProducts: Product[] = useMemo(() => {
+    const sourceList: StoreItem[] =
+      customItems.length > 0
+        ? customItems
+        : defaultProducts.map((p) => ({
+            id: p.id,
+            type: 'product',
+            name: p.name,
+            category: p.category,
+            slug: p.slug,
+            description: p.description,
+            image_url: p.image_url || p.image || '/logo.png',
+            video_url: p.video_url || '',
+            tags: p.tags,
+            published: true,
+            availability: p.availability || 'in_stock',
+          }));
+
+    return sourceList
+      .filter((item) => (item.type || 'product') === 'product' && item.published !== false)
+      .map((item): Product => ({
         id: item.id,
         name: item.name,
         category: item.category,
@@ -139,24 +156,15 @@ export const App: React.FC = () => {
         video_url: item.video_url,
         tags: item.tags,
         description: item.description,
-        type: 'product',
+        type: (item.type === 'video' ? 'video' : 'product'),
         published: item.published,
+        availability: item.availability || 'in_stock',
+        created_at: item.created_at,
+        updated_at: item.updated_at,
       }));
-
-    // Merge by id (custom items take precedence or are appended)
-    const combined = [...defaultProducts];
-    for (const cp of customProducts) {
-      const idx = combined.findIndex((p) => p.id === cp.id);
-      if (idx >= 0) {
-        combined[idx] = cp;
-      } else {
-        combined.unshift(cp);
-      }
-    }
-    return combined;
   }, [customItems]);
 
-  // All published & attached craft videos
+  // All published craft videos from active catalogue
   const allProductVideos = useMemo(() => {
     const list: Array<{
       id: string;
@@ -184,22 +192,8 @@ export const App: React.FC = () => {
       }
     }
 
-    for (const i of customItems) {
-      if (i.video_url && !seen.has(i.video_url)) {
-        seen.add(i.video_url);
-        list.push({
-          id: i.id,
-          name: i.name,
-          category: i.category,
-          video_url: i.video_url,
-          image_url: i.image_url,
-          description: i.description,
-        });
-      }
-    }
-
     return list;
-  }, [allProducts, customItems]);
+  }, [allProducts]);
 
   // Unique categories - includes requested primary categories, database categories, and products
   const categories = useMemo(() => {
@@ -316,10 +310,21 @@ export const App: React.FC = () => {
         setActiveCategory(matched);
         setCategoryNotFound(null);
       } else if (!isCatalogLoading) {
-        setCategoryNotFound(rawSlug);
+        // Check if any product directly matches the formatted category slug
+        const formatted = decodeURIComponent(rawSlug).replace(/-/g, ' ').trim();
+        const matchedProductCat = allProducts.find(
+          (p) => p.category.toLowerCase() === formatted.toLowerCase()
+        )?.category;
+
+        if (matchedProductCat) {
+          setActiveCategory(matchedProductCat);
+          setCategoryNotFound(null);
+        } else {
+          setCategoryNotFound(rawSlug);
+        }
       }
     }
-  }, [categories, isCatalogLoading]);
+  }, [categories, isCatalogLoading, allProducts]);
 
   // Refresh products & categories from database/server
   const refreshProducts = useCallback(async () => {
@@ -342,9 +347,19 @@ export const App: React.FC = () => {
     }
   }, []);
 
-  // Fetch initial products on mount
+  // Fetch initial products on mount and bind real-time event listeners
   useEffect(() => {
     refreshProducts();
+
+    const handleSync = () => {
+      refreshProducts();
+    };
+    window.addEventListener('storage', handleSync);
+    window.addEventListener('anmolkala_catalog_updated', handleSync);
+    return () => {
+      window.removeEventListener('storage', handleSync);
+      window.removeEventListener('anmolkala_catalog_updated', handleSync);
+    };
   }, [refreshProducts]);
 
   // Navigation handlers

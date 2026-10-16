@@ -165,6 +165,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       setMediaList(medias);
       setDbStatus(dbInfo);
       setDataError(null);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('anmolkala_catalog_updated'));
+      }
     } catch (e: any) {
       if (!isBackground) {
         setDataError(e.message || 'Could not load database records.');
@@ -181,18 +184,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   }, []);
 
   // Database Aggregate Counts (never default to false 0 when loading)
-  const isCountsLoading = isInitialLoading && !dbStatus && products.length === 0;
-  const totalProducts = isCountsLoading ? null : (dbStatus?.counts?.store_items ?? products.length);
+  const isCountsLoading = isInitialLoading || (loading && products.length === 0);
+  const totalProducts = isCountsLoading
+    ? null
+    : (products.length || dbStatus?.counts?.store_items || 0);
   const publishedProducts = isCountsLoading
     ? null
-    : (dbStatus?.counts?.published_products ?? products.filter((p) => p.published !== false).length);
+    : (products.filter((p) => p.published !== false).length || dbStatus?.counts?.published_products || 0);
   const totalPhotos = isCountsLoading
     ? null
-    : (dbStatus?.counts?.total_photos ?? (mediaList.filter((m) => m.media_type === 'image').length || products.length));
+    : (mediaList.filter((m) => m.media_type === 'image').length || products.length || dbStatus?.counts?.total_photos || 0);
   const totalVideos = isCountsLoading
     ? null
-    : (dbStatus?.counts?.products_with_videos ?? products.filter((p) => Boolean(p.video_url)).length);
-  const totalCategories = isCountsLoading ? null : (dbStatus?.counts?.categories ?? categories.length);
+    : (products.filter((p) => Boolean(p.video_url)).length || dbStatus?.counts?.products_with_videos || 0);
+  const totalCategories = isCountsLoading
+    ? null
+    : (categories.length || dbStatus?.counts?.categories || 0);
 
   // Filtered products in Manage Products
   const filteredProducts = useMemo(() => {
@@ -525,6 +532,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       await saveProduct(updated);
       setProducts((prev) => prev.map((item) => (item.id === p.id ? updated : item)));
       showToast(updated.published ? `"${p.name}" is now Published.` : `"${p.name}" moved to Draft.`);
+      loadData(true);
     } catch (e: any) {
       showToast(`Error updating publish status: ${e.message}`);
     }

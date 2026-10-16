@@ -158,8 +158,7 @@ export function parsePath(pathname: string, categoriesList: string[] = []): Pars
         view: 'catalog',
         category: formatted,
         productSlug: null,
-        // If categoriesList is empty (still loading), don't immediately declare not found
-        isCategoryNotFound: categoriesList.length > 0,
+        isCategoryNotFound: false,
         categorySlugParam: rawSlug,
       };
     }

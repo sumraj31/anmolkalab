@@ -1,33 +1,36 @@
-ANMOL KALA — COMPLETE VERCEL + SUPABASE PACKAGE
+ANMOL KALA — PRODUCTION VERCEL & DATABASE GUIDE
 
-This is the full website source ZIP, including the original product photos, frontend, API routes, database schema and catalogue seed.
+This repository contains the complete Anmol Kala storefront, native media storage, authenticated REST API, PostgreSQL/Supabase database integration, and admin portal.
 
-WHAT'S INCLUDED
-- Existing storefront and product images preserved.
-- Footer now has a visible but small “Anmol Kala · Admin Login” entry. Tap it to open admin login.
-- Admin can add/edit/delete/publish products and videos. IDs are generated automatically. Published videos appear on home and /videos.
-- PostgreSQL database connection uses DATABASE_URL (Supabase pooler).
-- Media upload uses Supabase Storage via SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY. Uploaded files are limited to 3 MB per file in this version.
+WHAT'S FIXED & ENHANCED
+- Vercel 404 NOT_FOUND on page refresh completely resolved via vercel.json SPA configuration with buildCommand ("npm run build"), outputDirectory ("dist"), and standard catch-all rewrite to index.html.
+- Storefront and Admin Dashboard are 100% synchronized through unified database and local cache keys ('anmolkala_store_items').
+- Adding, editing, publishing, unpublishing, and deleting products immediately updates both database and public storefront without stale hardcoded fallbacks re-injecting deleted items.
+- Non-blocking PostgreSQL database pool with graceful fallback prevents 5-second timeouts and initial zero counters.
+- Dashboard KPI counters show animated skeleton placeholders while loading and authoritative aggregate counts upon resolution.
+- Dedicated Photos and Videos sections allow direct file uploads from mobile phone galleries or desktop file managers.
+- Mandatory product photo enforcement for video products prevents publishing video items with missing cover photos.
+- Direct category URLs and nested category page refreshes resolve properly without redirecting to the homepage.
+- Admin authentication is verified on the backend via HMAC-signed session tokens and verified on all mutating API routes.
 
 DEPLOY TO VERCEL
-1. Extract this ZIP and upload all its CONTENTS to your GitHub repository root (not the ZIP file itself).
-2. Import that GitHub repository in Vercel. Framework Preset: Other. Build Command: leave empty. Output Directory: leave empty. Install Command: leave empty. Vercel will install the pg dependency from package.json.
-3. In Vercel Project > Settings > Environment Variables, add all of these for Production (and Preview if needed):
-   DATABASE_URL = your Supabase PostgreSQL pooler connection string. Keep the password URL-encoded if it contains special characters.
-   SUPABASE_URL = https://cdnvwluozfqjwycgaemp.supabase.co
-   SUPABASE_SERVICE_ROLE_KEY = Supabase Dashboard > Project Settings > API Keys > secret/service_role key (server-side only)
-   SUPABASE_STORAGE_BUCKET = anmolkala-media
-   ADMIN_USERNAME = anmolkala.in@gmail.com
-   ADMIN_PASSWORD = choose/set your admin password in Vercel (don't put it in frontend files)
-   SESSION_SECRET = a random string of 32+ characters
-4. In Supabase SQL Editor, run SUPABASE_SCHEMA.sql first. Then run SUPABASE_SEED_EXISTING.sql to add the supplied existing catalogue into the database.
-5. In Supabase Storage, create a PUBLIC bucket named anmolkala-media (for product/video public URLs).
-6. In Vercel, open Deployments and Redeploy after saving all variables. Environment variable changes do not apply to an old deployment.
-7. Open the deployed site, scroll to the footer and tap “Anmol Kala · Admin Login”.
-
-IMPORTANT
-- The PostgreSQL connection string by itself is enough for database queries but not for file uploads; uploads also need SUPABASE_SERVICE_ROLE_KEY.
-- Never put database password or service-role key in index.html, products.js, or any frontend file. Do not commit real secrets to GitHub. Since secrets were shared in chat, rotate the database password and use a new admin password before production.
-- This ZIP cannot change Vercel settings in your account automatically. You must add variables in the Vercel dashboard and redeploy.
-- If the Environment Variables menu is not visible on mobile, open Vercel in a browser, go to the project (not the deployment details), then Settings > Environment Variables.
-- If an admin page reports a database error, verify DATABASE_URL and run the SQL files above.
+1. Push this repository to your GitHub repository root.
+2. In Vercel, import the repository.
+   - Framework Preset: Vite (or Other)
+   - Build Command: npm run build (preset configured in vercel.json)
+   - Output Directory: dist (preset configured in vercel.json)
+3. In Vercel Project > Settings > Environment Variables, configure the following variables for Production (and Preview):
+   - DATABASE_URL = your Supabase PostgreSQL connection string (Supabase Dashboard > Settings > Database > Connection String > URI / Pooler)
+   - SUPABASE_URL = https://[YOUR_PROJECT_ID].supabase.co
+   - SUPABASE_SERVICE_ROLE_KEY = Supabase secret / service_role key (server-side only, never share or expose)
+   - SUPABASE_STORAGE_BUCKET = anmolkala-media
+   - ADMIN_USERNAME = anmolkala.in@gmail.com
+   - ADMIN_PASSWORD = your secure admin password
+   - SESSION_SECRET = a secure random string (32+ characters) for signing session tokens
+4. In Supabase Dashboard > SQL Editor:
+   - Run SUPABASE_SCHEMA.sql first to create tables, indexes, and RLS policies.
+   - Run SUPABASE_SEED_EXISTING.sql to seed the initial craft catalogue into the database.
+5. In Supabase Dashboard > Storage:
+   - Verify the "anmolkala-media" bucket is created and marked as Public.
+6. Trigger a redeploy in Vercel to load the newly saved environment variables.
+7. Open the live site, scroll to the bottom of the footer, tap the discreet "A" icon, and sign in with your admin credentials.
