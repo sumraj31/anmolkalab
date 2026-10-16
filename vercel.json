@@ -1,0 +1,38 @@
+{
+  "cleanUrls": true,
+  "trailingSlash": false,
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "/api/index"
+    },
+    {
+      "source": "/product/:slug",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/videos",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/admin/:match*",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/admin",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/category/:slug",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/catalog",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/((?!assets/|products/|logo\\.png|.*\\..*).*)",
+      "destination": "/index.html"
+    }
+  ]
+}
